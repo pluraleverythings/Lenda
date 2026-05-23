@@ -1,5 +1,7 @@
 # Lenda
 
+[![CI](https://github.com/pluraleverythings/lenda/actions/workflows/ci.yml/badge.svg)](https://github.com/pluraleverythings/lenda/actions/workflows/ci.yml)
+
 A smarter iPhone calendar timeline.
 
 ## What it does

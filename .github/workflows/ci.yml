@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Build & test (iOS Simulator)
+    runs-on: macos-15
+    env:
+      SCHEME: Lenda
+      PROJECT: Lenda.xcodeproj
+      DESTINATION: 'platform=iOS Simulator,name=iPhone 16,OS=latest'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Show environment
+        run: |
+          xcodebuild -version
+          swift --version
+          xcrun simctl list devices available iOS | sed -n '1,30p'
+
+      - name: Resolve test destination
+        id: dest
+        run: |
+          # Prefer the configured destination; if no matching simulator exists on
+          # this runner, fall back to the first available iPhone runtime so we
+          # don't break when Apple rotates the default device list.
+          set -e
+          if xcrun simctl list devices available iOS | grep -q "iPhone 16 "; then
+            echo "destination=$DESTINATION" >> "$GITHUB_OUTPUT"
+          else
+            FALLBACK_ID=$(xcrun simctl list devices available iOS -j \
+              | python3 -c "import sys,json; d=json.load(sys.stdin)['devices']; \
+                ids=[dev['udid'] for rt,devs in d.items() if 'iOS' in rt \
+                  for dev in devs if dev.get('isAvailable') and 'iPhone' in dev['name']]; \
+                print(ids[0] if ids else '', end='')")
+            if [ -z "$FALLBACK_ID" ]; then
+              echo "No iPhone simulator available on this runner" >&2
+              exit 1
+            fi
+            echo "destination=platform=iOS Simulator,id=$FALLBACK_ID" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build for testing
+        run: |
+          set -o pipefail
+          xcodebuild build-for-testing \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -destination "${{ steps.dest.outputs.destination }}" \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=
+
+      - name: Run tests
+        run: |
+          set -o pipefail
+          xcodebuild test-without-building \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -destination "${{ steps.dest.outputs.destination }}" \
+            -configuration Debug \
+            -resultBundlePath TestResults.xcresult \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: TestResults
+          path: TestResults.xcresult
+          if-no-files-found: ignore
