@@ -3,33 +3,25 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject var store: CalendarStore
 
-    private static let titleFmt: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "MMM d"
-        return f
-    }()
-
     var body: some View {
         NavigationStack {
-            WeekView()
-                .navigationTitle(weekTitle)
+            CalendarTimelineView()
+                .navigationTitle("Lenda")
                 .navigationBarTitleDisplayMode(.inline)
+                .toolbarBackground(DR.surface, for: .navigationBar)
+                .toolbarBackground(.visible, for: .navigationBar)
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
                             store.reload()
                         } label: {
                             Image(systemName: "arrow.clockwise")
+                                .foregroundStyle(DR.ink)
                         }
                         .disabled(store.access != .granted)
                     }
                 }
         }
-    }
-
-    private var weekTitle: String {
-        guard let first = store.days.first?.date,
-              let last = store.days.last?.date else { return "This Week" }
-        return "\(Self.titleFmt.string(from: first)) – \(Self.titleFmt.string(from: last))"
+        .tint(DR.accent)
     }
 }

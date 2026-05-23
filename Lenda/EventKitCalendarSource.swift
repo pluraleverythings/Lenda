@@ -1,0 +1,29 @@
+import Foundation
+import EventKit
+
+final class EventKitCalendarSource: CalendarSource {
+    private let store = EKEventStore()
+
+    func requestAccess() async throws -> Bool {
+        if #available(iOS 17.0, *) {
+            return try await store.requestFullAccessToEvents()
+        } else {
+            return try await store.requestAccess(to: .event)
+        }
+    }
+
+    func events(from start: Date, to end: Date) -> [SourceEvent] {
+        let predicate = store.predicateForEvents(withStart: start, end: end, calendars: nil)
+        return store.events(matching: predicate).map { ek in
+            SourceEvent(
+                id: ek.eventIdentifier ?? UUID().uuidString,
+                title: ek.title ?? "(No title)",
+                start: ek.startDate,
+                end: ek.endDate,
+                isAllDay: ek.isAllDay,
+                location: ek.location,
+                cgColor: ek.calendar?.cgColor
+            )
+        }
+    }
+}

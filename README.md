@@ -1,67 +1,86 @@
 # Lenda
 
-A smarter iPhone week view for your iCloud / iOS calendars.
+A smarter iPhone calendar timeline.
 
-## Why
+## What it does
 
 iCal's week view wastes most of its space on empty hours and forces horizontal
-scrolling to see a whole day. Lenda does the opposite:
+scrolling to see a whole day. Lenda inverts that:
 
-- **7 day rows stacked vertically**, today on top. Each row is a full day rendered
-  horizontally.
-- **No horizontal scrolling.** Every day fits edge to edge.
-- **Dynamic hour width.** The time axis is shared across the week. Hours where
-  *no day* has any event get compressed to a thin hatched strip; busy hours
-  expand to fill the rest of the width. So 2 AM – 7 AM with nothing happening
-  becomes a sliver, and your 9–11 AM crunch gets the real estate it deserves.
-- **Time stays aligned across days,** so you can scan a column and compare
-  what's happening at, say, 10 AM across the week.
-- **Today is highlighted** with an accent border and a live "now" indicator.
+- **Day rows stacked vertically**, each day rendered horizontally as a full
+  24-hour track.
+- **No horizontal scrolling.** Every day fits edge-to-edge.
+- **Dynamic hour width.** A time axis is computed from the union of every
+  event in the loaded window. Hours where *no day* has events collapse to a
+  thin tinted strip; busy hours expand to fill the rest. Time stays aligned
+  across rows, so you can scan a column.
+- **Vertical scrolling in both directions.** The view opens with today at the
+  top; scroll up to revisit the recent past, down to look ahead. The loaded
+  range expands lazily as you scroll past either edge.
+- **Month bar across the top.** Tap any month to jump there; the bar
+  highlights/centers the month of whichever day is currently at the top of
+  the viewport.
+- **Today** gets a single warm-orange accent — a thin bar in the day label,
+  the day number, and a 1pt "now" line in the track. Everything else is
+  neutral.
+
+## Look & feel
+
+Dieter Rams territory: no cards, no shadows, no rounded chips, no gradients.
+Hairline rules separate sections. Events are pale tinted fills with a 2pt
+colored edge bar identifying the source calendar — colour is functional, not
+decorative. The compressed zones are simply a slightly darker surface — no
+hatching, no icons. The single warm accent (Braun-orange) is reserved for
+"today" and "now".
 
 ## Architecture
 
-- `LendaApp.swift` – `@main` SwiftUI entry point, wires up `CalendarStore`.
-- `CalendarStore.swift` – EventKit access, loads the next 7 days into
-  `DayBucket`s.
-- `Models.swift` – `DayEvent`, `DayBucket` data types.
-- `TimeAxis.swift` – the piecewise-linear time-to-x mapping that compresses
-  empty hours. Pure logic, unit-testable.
-- `WeekView.swift` – top-level layout. Builds the shared `TimeAxis` from every
-  timed event in the week, then renders a header + 7 stacked `DayRowView`s.
-- `DayRowView.swift` – one day. Renders the day's track with compressed-zone
-  hatching, hour gridlines, lane-packed event blocks, and (on today) a "now"
-  bar.
-- `TimeAxisHeader.swift` – the hour labels along the top.
-- `EventBlock.swift` – one event rectangle.
+```
+Lenda/
+  LendaApp.swift               @main, wires up CalendarStore + ContentView
+  ContentView.swift            NavigationStack chrome
+  CalendarTimelineView.swift   Top-level layout (month bar + axis + scroll list)
+  MonthBar.swift               Horizontal month strip; tap to jump, auto-tracks visible day
+  DayRowView.swift             One day; renders compressed zones, ticks, packed events, "now" line
+  TimeAxisHeader.swift         Hour labels along the top, aligned with the tracks
+  EventBlock.swift             One event rectangle
+  PermissionView.swift         Calendar access onboarding
 
-## How the time axis works
+  CalendarSource.swift         protocol + plain SourceEvent struct (EventKit-free)
+  EventKitCalendarSource.swift production implementation
+  CalendarStore.swift          @MainActor ObservableObject; owns loaded days + TimeAxis
+  DayBucket.swift              One day's projected events
+  DayEvent.swift               SourceEvent projected onto a single day
+  LanePacker.swift             Greedy lane assignment for overlapping events
+  TimeAxis.swift               Piecewise-linear time-to-x mapping + AxisLayout helper
+  Theme.swift                  Dieter Rams design tokens (DR namespace)
+```
 
-`TimeAxis.build(from:)` takes every timed event's `(startMinute, endMinute)`
-across the whole week, unions them with a 30-minute padding, then walks the
-day from 00:00 → 24:00:
+The `CalendarSource` protocol is the boundary that keeps EventKit out of the
+rest of the app — and lets `LendaTests` drive `CalendarStore` with a fake.
 
-1. Anywhere events overlap → **dense** segment, weight = its minute span.
-2. Gaps shorter than 90 min → stay **dense** (so neighboring meetings don't
-   look weirdly far apart).
-3. Gaps ≥ 90 min → **compressed**, weight = 30 (≈ half an hour's worth of
-   pixels regardless of how many real hours it spans).
+## Tests
 
-The total weight maps to the available width, and `x(forMinute:totalWidth:)`
-returns a piecewise-linear x for any time-of-day. Every day row uses the same
-axis, so columns line up.
+`LendaTests` covers the public interfaces of the logic layer:
 
-## Requirements
+- `TimeAxisTests` — boundary invariants (0 → 0, 1440 → totalWidth, monotonic),
+  compression behavior across event densities, hour-tick ordering and
+  uniqueness, determinism.
+- `LanePackerTests` — non-overlap on each lane, minimum-lane assignment, lane
+  reuse after a cluster ends, stable start-time ordering.
+- `CalendarStoreTests` — access lifecycle (grant / deny / throw), bucketing
+  by day, multi-day splits, all-day handling, time-axis derivation, lazy
+  range expansion via `ensureLoaded(around:)`, month-bar coverage.
 
-- Xcode 16 or newer (uses file-system-synchronized project groups).
-- iOS 17 deployment target.
-- The first launch will request Calendar access via `EKEventStore`.
+Run with ⌘U in Xcode or `xcodebuild test -scheme Lenda -destination 'platform=iOS Simulator,name=iPhone 15'`.
 
 ## Build & run
+
+Requires Xcode 16+. Deployment target: iOS 17.
 
 ```
 open Lenda.xcodeproj
 ```
 
-Pick a simulator (iPhone 15 or newer) or your device, and ⌘R. On a fresh
-simulator you'll want to add a few events in the Calendar app first so there's
-something to render.
+Pick an iPhone simulator and ⌘R. Add a few events in the simulator's Calendar
+app first so there's something to render.

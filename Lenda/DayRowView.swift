@@ -2,8 +2,7 @@ import SwiftUI
 
 struct DayRowView: View {
     let day: DayBucket
-    let axis: TimeAxis
-    let dayLabelWidth: CGFloat
+    let layout: AxisLayout
 
     private static let weekdayFmt: DateFormatter = {
         let f = DateFormatter()
@@ -16,157 +15,98 @@ struct DayRowView: View {
         return f
     }()
 
-    private static let rowHeight: CGFloat = 72
-
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
             dayLabel
-                .frame(width: dayLabelWidth, alignment: .leading)
+                .frame(width: DR.dayLabelWidth, height: DR.dayRowHeight, alignment: .topLeading)
             track
+                .frame(width: layout.width, height: DR.dayRowHeight)
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, DR.horizontalPadding)
+        .background(DR.surface)
     }
+
+    // MARK: - Day label
 
     private var dayLabel: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(Self.weekdayFmt.string(from: day.date).uppercased())
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(day.isToday ? Color.accentColor : .secondary)
-            Text(Self.dayNumFmt.string(from: day.date))
-                .font(.title2.weight(day.isToday ? .bold : .regular))
-                .foregroundStyle(day.isToday ? Color.accentColor : .primary)
-            if !day.allDayEvents.isEmpty {
-                Text("\(day.allDayEvents.count) all-day")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
+        HStack(alignment: .top, spacing: 6) {
+            if day.isToday {
+                Rectangle()
+                    .fill(DR.accent)
+                    .frame(width: 2)
+                    .padding(.vertical, 4)
+            } else {
+                Color.clear.frame(width: 2)
+            }
+            VStack(alignment: .leading, spacing: 0) {
+                Text(Self.weekdayFmt.string(from: day.date).uppercased())
+                    .font(DR.TypeStyle.weekday)
+                    .foregroundStyle(day.isToday ? DR.accent : DR.inkSecondary)
+                Text(Self.dayNumFmt.string(from: day.date))
+                    .font(day.isToday ? DR.TypeStyle.dayNumberToday : DR.TypeStyle.dayNumber)
+                    .foregroundStyle(day.isToday ? DR.accent : DR.ink)
+                if !day.allDayEvents.isEmpty {
+                    Text("\(day.allDayEvents.count) all-day")
+                        .font(DR.TypeStyle.allDayHint)
+                        .foregroundStyle(DR.inkTertiary)
+                        .lineLimit(1)
+                }
             }
         }
-        .frame(height: Self.rowHeight, alignment: .top)
-        .padding(.top, 2)
+        .padding(.top, 8)
     }
 
+    // MARK: - Track
+
     private var track: some View {
-        GeometryReader { proxy in
-            let w = proxy.size.width
-            ZStack(alignment: .topLeading) {
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Color(.secondarySystemBackground))
-
-                // Compressed zones
-                ForEach(axis.compressedRanges(totalWidth: w)) { range in
-                    CompressedZone(range: range)
-                }
-
-                // Hour gridlines
-                ForEach(axis.hourTicks(totalWidth: w)) { tick in
-                    Rectangle()
-                        .fill(Color(.separator).opacity(tick.isCompressedBoundary ? 0.55 : 0.25))
-                        .frame(width: tick.isCompressedBoundary ? 1 : 1)
-                        .offset(x: tick.x)
-                        .allowsHitTesting(false)
-                }
-
-                // Timed events with lane assignment for overlaps
-                let lanes = assignLanes(day.timedEvents)
-                ForEach(lanes, id: \.event.id) { item in
-                    let startX = axis.x(forMinute: item.event.startMinutes, totalWidth: w)
-                    let endX = axis.x(forMinute: item.event.endMinutes, totalWidth: w)
-                    let laneCount = max(1, item.totalLanes)
-                    let usableHeight = Self.rowHeight - 8
-                    let laneHeight = usableHeight / CGFloat(laneCount)
-                    EventBlock(event: item.event, compact: laneCount > 1)
-                        .frame(width: max(3, endX - startX), height: laneHeight - 2)
-                        .offset(x: startX,
-                                y: 4 + CGFloat(item.lane) * laneHeight)
-                }
-
-                // "Now" indicator on today
-                if day.isToday {
-                    let nowMin = currentMinuteOfDay()
-                    let nowX = axis.x(forMinute: nowMin, totalWidth: w)
-                    Rectangle()
-                        .fill(Color.red)
-                        .frame(width: 2)
-                        .offset(x: nowX - 1)
-                    Circle()
-                        .fill(Color.red)
-                        .frame(width: 6, height: 6)
-                        .offset(x: nowX - 3, y: -3)
-                }
+        ZStack(alignment: .topLeading) {
+            // Compressed regions: a slightly darker tint, no hatching, no icon — silence.
+            ForEach(layout.compressedRanges) { range in
+                Rectangle()
+                    .fill(DR.surfaceCompressed)
+                    .frame(width: max(0, range.endX - range.startX))
+                    .offset(x: range.startX)
             }
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-            .overlay(
-                RoundedRectangle(cornerRadius: 10)
-                    .stroke(day.isToday ? Color.accentColor.opacity(0.55) : Color.clear,
-                            lineWidth: 1.5)
-            )
+
+            // Hour gridlines: hairline only, slightly stronger at compressed boundaries.
+            ForEach(layout.hourTicks) { tick in
+                Rectangle()
+                    .fill(tick.isCompressedBoundary ? DR.ruleStrong.opacity(0.5) : DR.rule)
+                    .frame(width: DR.hairline)
+                    .offset(x: tick.x)
+                    .allowsHitTesting(false)
+            }
+
+            // Events, lane-packed
+            ForEach(LanePacker.pack(day.timedEvents), id: \.event.id) { item in
+                let startX = layout.x(forMinute: item.event.startMinute)
+                let endX = layout.x(forMinute: item.event.endMinute)
+                let usableHeight = DR.dayRowHeight - 16
+                let laneHeight = usableHeight / CGFloat(max(1, item.totalLanes))
+                EventBlock(event: item.event)
+                    .frame(width: max(3, endX - startX), height: laneHeight - 2)
+                    .offset(x: startX, y: 8 + CGFloat(item.lane) * laneHeight)
+            }
+
+            // Now indicator on today only.
+            if day.isToday {
+                let nowX = layout.x(forMinute: currentMinuteOfDay())
+                Rectangle()
+                    .fill(DR.accent)
+                    .frame(width: 1)
+                    .offset(x: nowX)
+                    .allowsHitTesting(false)
+                Circle()
+                    .fill(DR.accent)
+                    .frame(width: 5, height: 5)
+                    .offset(x: nowX - 2, y: -2)
+            }
         }
-        .frame(height: Self.rowHeight)
     }
 
     private func currentMinuteOfDay() -> Int {
         let cal = Calendar.current
         let now = Date()
         return cal.component(.hour, from: now) * 60 + cal.component(.minute, from: now)
-    }
-
-    // MARK: - Lane packing
-
-    private struct LaneItem {
-        let event: DayEvent
-        let lane: Int
-        let totalLanes: Int
-    }
-
-    private func assignLanes(_ events: [DayEvent]) -> [LaneItem] {
-        let sorted = events.sorted { $0.startMinutes < $1.startMinutes }
-        var laneEnd: [Int] = []
-        var assignment: [String: Int] = [:]
-        for ev in sorted {
-            var placed = false
-            for i in laneEnd.indices where laneEnd[i] <= ev.startMinutes {
-                assignment[ev.id] = i
-                laneEnd[i] = ev.endMinutes
-                placed = true
-                break
-            }
-            if !placed {
-                assignment[ev.id] = laneEnd.count
-                laneEnd.append(ev.endMinutes)
-            }
-        }
-        let total = max(1, laneEnd.count)
-        return sorted.map { LaneItem(event: $0, lane: assignment[$0.id] ?? 0, totalLanes: total) }
-    }
-}
-
-private struct CompressedZone: View {
-    let range: TimeAxis.CompressedRange
-
-    var body: some View {
-        ZStack {
-            DiagonalHatch()
-                .stroke(Color.secondary.opacity(0.35), lineWidth: 0.5)
-                .background(Color(.tertiarySystemBackground))
-                .clipped()
-        }
-        .frame(width: max(0, range.endX - range.startX))
-        .offset(x: range.startX)
-    }
-}
-
-private struct DiagonalHatch: Shape {
-    func path(in rect: CGRect) -> Path {
-        var p = Path()
-        let spacing: CGFloat = 5
-        var x: CGFloat = -rect.height
-        while x < rect.width + rect.height {
-            p.move(to: CGPoint(x: x, y: 0))
-            p.addLine(to: CGPoint(x: x + rect.height, y: rect.height))
-            x += spacing
-        }
-        return p
     }
 }

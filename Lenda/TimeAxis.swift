@@ -1,9 +1,9 @@
 import Foundation
 import CoreGraphics
 
-/// A piecewise-linear mapping from time-of-day (in minutes 0...1440) to a horizontal x
-/// coordinate. Hours where no event happens across the entire visible week are
-/// "compressed" to a small fixed weight; busy hours expand to fill the rest of the width.
+/// A piecewise-linear mapping from time-of-day (minutes 0...1440) to a horizontal x
+/// coordinate. Hour ranges with no events in the entire visible window collapse to a
+/// fixed small weight; busy hours expand to fill the rest of the width.
 struct TimeAxis: Equatable {
     struct Segment: Equatable {
         let startMinute: Int
@@ -13,11 +13,31 @@ struct TimeAxis: Equatable {
         var minuteSpan: Int { endMinute - startMinute }
     }
 
+    struct HourTick: Identifiable, Equatable {
+        let id: Int           // minute-of-day, doubles as a stable identity
+        let minute: Int
+        let x: CGFloat
+        let isCompressedBoundary: Bool
+    }
+
+    struct CompressedRange: Identifiable, Equatable {
+        let id: Int
+        let startMinute: Int
+        let endMinute: Int
+        let startX: CGFloat
+        let endX: CGFloat
+        var label: String {
+            "\(TimeAxis.hourLabel(startMinute)) – \(TimeAxis.hourLabel(endMinute))"
+        }
+    }
+
     let segments: [Segment]
     let compressedSegmentWeight: Int
     let paddingMinutes: Int
 
-    /// Build an axis from the union of all timed events in the week.
+    // MARK: - Construction
+
+    /// Build an axis from the union of all timed events in the visible window.
     /// `intervals` is `(startMinute, endMinute)` per event, each clamped to one day.
     static func build(
         from intervals: [(Int, Int)],
@@ -57,7 +77,9 @@ struct TimeAxis: Equatable {
         // Collapse adjacent segments of the same density.
         var collapsed: [Segment] = []
         for s in segs {
-            if let last = collapsed.last, last.isDense == s.isDense, last.endMinute == s.startMinute {
+            if let last = collapsed.last,
+               last.isDense == s.isDense,
+               last.endMinute == s.startMinute {
                 collapsed[collapsed.count - 1] = Segment(
                     startMinute: last.startMinute,
                     endMinute: s.endMinute,
@@ -74,6 +96,8 @@ struct TimeAxis: Equatable {
             paddingMinutes: paddingMinutes
         )
     }
+
+    // MARK: - Mapping
 
     var totalWeight: Int {
         segments.reduce(0) { acc, s in
@@ -97,13 +121,6 @@ struct TimeAxis: Equatable {
             used += s.isDense ? s.minuteSpan : compressedSegmentWeight
         }
         return totalWidth
-    }
-
-    struct HourTick: Identifiable {
-        let id: Int
-        let minute: Int
-        let x: CGFloat
-        let isCompressedBoundary: Bool
     }
 
     /// Hour-boundary tick positions across all dense segments, plus the start/end of each
@@ -133,15 +150,6 @@ struct TimeAxis: Equatable {
         return out
     }
 
-    struct CompressedRange: Identifiable {
-        let id: Int
-        let startMinute: Int
-        let endMinute: Int
-        let startX: CGFloat
-        let endX: CGFloat
-        var label: String { "\(TimeAxis.hourLabel(startMinute)) – \(TimeAxis.hourLabel(endMinute))" }
-    }
-
     func compressedRanges(totalWidth: CGFloat) -> [CompressedRange] {
         segments
             .filter { !$0.isDense }
@@ -166,4 +174,22 @@ struct TimeAxis: Equatable {
         default: return "\(h - 12)p"
         }
     }
+}
+
+/// Pre-computed positions for a given width. Holding one of these in the parent view
+/// avoids each row recomputing the same tick layout in its body.
+struct AxisLayout: Equatable {
+    let axis: TimeAxis
+    let width: CGFloat
+    let hourTicks: [TimeAxis.HourTick]
+    let compressedRanges: [TimeAxis.CompressedRange]
+
+    init(axis: TimeAxis, width: CGFloat) {
+        self.axis = axis
+        self.width = width
+        self.hourTicks = axis.hourTicks(totalWidth: width)
+        self.compressedRanges = axis.compressedRanges(totalWidth: width)
+    }
+
+    func x(forMinute m: Int) -> CGFloat { axis.x(forMinute: m, totalWidth: width) }
 }

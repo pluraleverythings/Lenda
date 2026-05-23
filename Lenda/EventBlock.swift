@@ -1,25 +1,25 @@
 import SwiftUI
 
+/// Rams-style event block: pale tinted fill, thin saturated edge bar in the calendar's
+/// colour, dark text. Color is functional (identifies the source) — not decorative.
 struct EventBlock: View {
     let event: DayEvent
-    let compact: Bool
 
     var body: some View {
-        ZStack(alignment: .leading) {
-            RoundedRectangle(cornerRadius: 5)
-                .fill(event.calendarColor.opacity(0.88))
-            HStack(spacing: 3) {
+        HStack(spacing: 0) {
+            Rectangle()
+                .fill(event.color)
+                .frame(width: 2)
+            ZStack(alignment: .leading) {
                 Rectangle()
-                    .fill(Color.white.opacity(0.5))
-                    .frame(width: 2)
-                    .padding(.vertical, 2)
+                    .fill(event.color.opacity(0.18))
                 Text(event.title)
-                    .font(.system(size: compact ? 9 : 10, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .font(DR.TypeStyle.eventTitle)
+                    .foregroundStyle(DR.ink)
                     .lineLimit(1)
                     .truncationMode(.tail)
+                    .padding(.horizontal, 4)
             }
-            .padding(.horizontal, 3)
         }
     }
 }
