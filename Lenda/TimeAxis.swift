@@ -43,7 +43,7 @@ struct TimeAxis: Equatable {
         from intervals: [(Int, Int)],
         paddingMinutes: Int = 30,
         minGapForCompression: Int = 90,
-        compressedSegmentWeight: Int = 30
+        compressedSegmentWeight: Int = 20
     ) -> TimeAxis {
         let padded = intervals
             .filter { $0.1 > $0.0 }
