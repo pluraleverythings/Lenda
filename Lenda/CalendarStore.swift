@@ -27,6 +27,12 @@ final class CalendarStore: ObservableObject {
     private let initialFutureDays: Int
     private let expansionPadDays: Int
 
+    /// Hard bounds on how far the loaded range may extend from `today`. A safety net so a
+    /// stray expansion can never run the range off to absurd dates and build tens of
+    /// thousands of day buckets (which wedges the main thread).
+    private let maxPastDays = 366 * 2
+    private let maxFutureDays = 366 * 2
+
     init(source: CalendarSource = EventKitCalendarSource(),
          calendar: Calendar = .current,
          today: Date = Date(),
@@ -77,8 +83,13 @@ final class CalendarStore: ObservableObject {
     func ensureLoaded(around date: Date) {
         guard access == .granted else { return }
         let target = calendar.startOfDay(for: date)
-        let wantStart = calendar.date(byAdding: .day, value: -expansionPadDays, to: target) ?? target
-        let wantEnd = calendar.date(byAdding: .day, value: expansionPadDays + 1, to: target) ?? target
+        let rawStart = calendar.date(byAdding: .day, value: -expansionPadDays, to: target) ?? target
+        let rawEnd = calendar.date(byAdding: .day, value: expansionPadDays + 1, to: target) ?? target
+
+        let floor = calendar.date(byAdding: .day, value: -maxPastDays, to: today) ?? today
+        let ceiling = calendar.date(byAdding: .day, value: maxFutureDays, to: today) ?? today
+        let wantStart = max(rawStart, floor)
+        let wantEnd = min(rawEnd, ceiling)
 
         var changed = false
         if wantStart < rangeStart { rangeStart = wantStart; changed = true }

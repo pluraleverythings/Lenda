@@ -58,7 +58,6 @@ struct CalendarTimelineView: View {
                             ForEach(store.days) { day in
                                 DayRowView(day: day, layout: layout)
                                     .id(day.id)
-                                    .onAppear { store.ensureLoaded(around: day.date) }
                                 Rectangle()
                                     .fill(DR.rule)
                                     .frame(height: DR.hairline)
@@ -67,6 +66,12 @@ struct CalendarTimelineView: View {
                         .scrollTargetLayout()
                     }
                     .scrollPosition(id: $topDayID, anchor: .top)
+                    // Expand only as the user scrolls the top of the viewport near an
+                    // edge. Driving this off the scroll position (not every row's
+                    // onAppear) avoids a reload→re-create→onAppear→reload feedback loop.
+                    .onChange(of: topDayID) { _, newTop in
+                        if let newTop { store.ensureLoaded(around: newTop) }
+                    }
                     .onAppear {
                         if !didAnchorOnToday {
                             didAnchorOnToday = true
