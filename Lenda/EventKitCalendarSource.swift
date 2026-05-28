@@ -13,7 +13,19 @@ final class EventKitCalendarSource: CalendarSource {
     }
 
     func events(from start: Date, to end: Date) -> [SourceEvent] {
-        let predicate = store.predicateForEvents(withStart: start, end: end, calendars: nil)
+        // Force the store to pick up newly-added accounts / recently-synced
+        // calendars; without this a CalDAV/iCloud account added after launch is
+        // silently absent from queries.
+        store.refreshSourcesIfNecessary()
+
+        // `calendars: nil` is documented as "all calendars" but in practice
+        // quietly skips some subscribed/remote calendars in mixed setups.
+        // Enumerate every event-type calendar the app has access to and pass
+        // the explicit list so nothing gets dropped.
+        let calendars = store.calendars(for: .event)
+        guard !calendars.isEmpty else { return [] }
+
+        let predicate = store.predicateForEvents(withStart: start, end: end, calendars: calendars)
         return store.events(matching: predicate).map { ek in
             SourceEvent(
                 id: ek.eventIdentifier ?? UUID().uuidString,
