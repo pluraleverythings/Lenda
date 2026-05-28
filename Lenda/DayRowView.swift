@@ -45,12 +45,6 @@ struct DayRowView: View {
                 Text(Self.dayNumFmt.string(from: day.date))
                     .font(day.isToday ? DR.TypeStyle.dayNumberToday : DR.TypeStyle.dayNumber)
                     .foregroundStyle(day.isToday ? DR.accent : DR.ink)
-                if !day.allDayEvents.isEmpty {
-                    Text("\(day.allDayEvents.count) all-day")
-                        .font(DR.TypeStyle.allDayHint)
-                        .foregroundStyle(DR.inkTertiary)
-                        .lineLimit(1)
-                }
             }
         }
         .padding(.top, 8)
@@ -58,7 +52,47 @@ struct DayRowView: View {
 
     // MARK: - Track
 
+    private var bannerSectionHeight: CGFloat {
+        day.allDayEvents.isEmpty ? 0 : 18
+    }
+
     private var track: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if !day.allDayEvents.isEmpty {
+                allDayBanners
+                    .frame(height: bannerSectionHeight, alignment: .topLeading)
+            }
+            timedTrack
+        }
+    }
+
+    private var allDayBanners: some View {
+        HStack(spacing: 4) {
+            ForEach(day.allDayEvents.prefix(3), id: \.id) { event in
+                HStack(spacing: 0) {
+                    Rectangle()
+                        .fill(event.color)
+                        .frame(width: 2)
+                    Text(event.title)
+                        .font(DR.TypeStyle.eventTitle)
+                        .foregroundStyle(DR.ink)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .padding(.horizontal, 4)
+                        .background(event.color.opacity(0.18))
+                }
+                .frame(height: 14)
+            }
+            if day.allDayEvents.count > 3 {
+                Text("+\(day.allDayEvents.count - 3)")
+                    .font(DR.TypeStyle.allDayHint)
+                    .foregroundStyle(DR.inkTertiary)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var timedTrack: some View {
         ZStack(alignment: .topLeading) {
             // Compressed regions: a slightly darker tint, no hatching, no icon — silence.
             ForEach(layout.compressedRanges) { range in
@@ -81,7 +115,7 @@ struct DayRowView: View {
             ForEach(LanePacker.pack(day.timedEvents), id: \.event.id) { item in
                 let startX = layout.x(forMinute: item.event.startMinute)
                 let endX = layout.x(forMinute: item.event.endMinute)
-                let usableHeight = DR.dayRowHeight - 16
+                let usableHeight = DR.dayRowHeight - bannerSectionHeight - 16
                 let laneHeight = usableHeight / CGFloat(max(1, item.totalLanes))
                 EventBlock(event: item.event)
                     .frame(width: max(3, endX - startX), height: laneHeight - 2)
