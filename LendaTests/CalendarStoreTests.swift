@@ -124,17 +124,19 @@ final class CalendarStoreTests: XCTestCase {
         )]
         let store = makeStore(source: source)
         await store.requestAccessAndLoad()
-        let ranges = store.timeAxis.compressedRanges(totalWidth: 1000)
-        XCTAssertFalse(ranges.isEmpty, "isolated event should compress the rest of the day")
+        let ticks = store.timeAxis.hourTicks(totalWidth: 1000)
+        // Hour 9 hosted an event; hour 2 didn't — so 9 must be wider.
+        XCTAssertGreaterThan(ticks[9].width, ticks[2].width)
+        XCTAssertFalse(ticks[9].isEmpty)
+        XCTAssertTrue(ticks[2].isEmpty)
     }
 
     func test_timeAxis_withNoEvents_fallsBackToBusinessHours() async {
         let store = makeStore()
         await store.requestAccessAndLoad()
-        // Falls back to a 7am–10pm dense window; everything outside should be compressed
-        // or absent (i.e., axis is well-defined and doesn't crash).
+        // No events → business-hours bias: 10am must be wider than 2am.
         let ticks = store.timeAxis.hourTicks(totalWidth: 1000)
-        XCTAssertFalse(ticks.isEmpty)
+        XCTAssertGreaterThan(ticks[10].width, ticks[2].width)
     }
 
     // MARK: - Range expansion

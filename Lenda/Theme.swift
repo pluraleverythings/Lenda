@@ -34,9 +34,7 @@ enum DR {
         static let weekday: Font = .system(size: 10, weight: .medium)
         static let dayNumber: Font = .system(size: 22, weight: .regular)
         static let dayNumberToday: Font = .system(size: 22, weight: .semibold)
-        static let allDayHint: Font = .system(size: 9, weight: .regular)
         static let eventTitle: Font = .system(size: 10, weight: .medium)
         static let hourTick: Font = .system(size: 9, weight: .regular)
-        static let hourTickEmphasis: Font = .system(size: 9, weight: .semibold)
     }
 }

@@ -1,167 +1,71 @@
 import Foundation
 import CoreGraphics
 
-/// A piecewise-linear mapping from time-of-day (minutes 0...1440) to a horizontal x
-/// coordinate. Hour ranges with no events in the entire visible window collapse to a
-/// fixed small weight; busy hours expand to fill the rest of the width.
+/// A horizontal mapping where each hour's width is proportional to how much activity
+/// happens at that hour across the loaded window. Empty hours collapse to a baseline
+/// sliver; busy hours expand. At a glance the axis stretches around when your events
+/// actually happen.
 struct TimeAxis: Equatable {
-    struct Segment: Equatable {
-        let startMinute: Int
-        let endMinute: Int
-        let isDense: Bool
-
-        var minuteSpan: Int { endMinute - startMinute }
-    }
+    /// Width weights for hours 0…23. Larger = wider on screen.
+    let hourWeights: [Double]
+    let baseWeight: Double
 
     struct HourTick: Identifiable, Equatable {
-        let id: Int           // minute-of-day, doubles as a stable identity
-        let minute: Int
-        let x: CGFloat
-        let isCompressedBoundary: Bool
-    }
-
-    struct CompressedRange: Identifiable, Equatable {
         let id: Int
-        let startMinute: Int
-        let endMinute: Int
-        let startX: CGFloat
-        let endX: CGFloat
-        var label: String {
-            "\(TimeAxis.hourLabel(startMinute)) – \(TimeAxis.hourLabel(endMinute))"
-        }
+        let minute: Int     // multiple of 60 (0…1440)
+        let x: CGFloat      // left edge of this hour in the totalWidth
+        let width: CGFloat  // width allocated to this hour (0 at the closing 1440 tick)
+        let isEmpty: Bool   // true if this hour received only baseWeight
     }
 
-    let segments: [Segment]
-    let compressedSegmentWeight: Int
-    let paddingMinutes: Int
-
-    // MARK: - Construction
-
-    /// Build an axis from the union of all timed events in the visible window.
-    /// `intervals` is `(startMinute, endMinute)` per event, each clamped to one day.
+    /// Build an axis from a per-hour event count (24 entries, index = hour-of-day).
+    /// `baseWeight` keeps zero-event hours visible but tiny; `countScale` controls how
+    /// aggressively busy hours expand relative to empty ones.
     static func build(
-        from intervals: [(Int, Int)],
-        paddingMinutes: Int = 30,
-        minGapForCompression: Int = 90,
-        compressedSegmentWeight: Int = 20
+        from hourEventCounts: [Int],
+        baseWeight: Double = 0.15,
+        countScale: Double = 1.0
     ) -> TimeAxis {
-        let padded = intervals
-            .filter { $0.1 > $0.0 }
-            .map { (max(0, $0.0 - paddingMinutes), min(1440, $0.1 + paddingMinutes)) }
-            .sorted { $0.0 < $1.0 }
-
-        var merged: [(Int, Int)] = []
-        for iv in padded {
-            if let last = merged.last, last.1 >= iv.0 {
-                merged[merged.count - 1] = (last.0, max(last.1, iv.1))
-            } else {
-                merged.append(iv)
-            }
-        }
-
-        var segs: [Segment] = []
-        var cursor = 0
-        for (s, e) in merged {
-            if s > cursor {
-                let dense = (s - cursor) < minGapForCompression
-                segs.append(Segment(startMinute: cursor, endMinute: s, isDense: dense))
-            }
-            segs.append(Segment(startMinute: s, endMinute: e, isDense: true))
-            cursor = e
-        }
-        if cursor < 1440 {
-            let dense = (1440 - cursor) < minGapForCompression
-            segs.append(Segment(startMinute: cursor, endMinute: 1440, isDense: dense))
-        }
-
-        // Collapse adjacent segments of the same density.
-        var collapsed: [Segment] = []
-        for s in segs {
-            if let last = collapsed.last,
-               last.isDense == s.isDense,
-               last.endMinute == s.startMinute {
-                collapsed[collapsed.count - 1] = Segment(
-                    startMinute: last.startMinute,
-                    endMinute: s.endMinute,
-                    isDense: last.isDense
-                )
-            } else {
-                collapsed.append(s)
-            }
-        }
-
-        return TimeAxis(
-            segments: collapsed,
-            compressedSegmentWeight: compressedSegmentWeight,
-            paddingMinutes: paddingMinutes
-        )
+        let counts = hourEventCounts.count == 24
+            ? hourEventCounts
+            : Array(repeating: 0, count: 24)
+        let weights = counts.map { baseWeight + countScale * Double($0) }
+        return TimeAxis(hourWeights: weights, baseWeight: baseWeight)
     }
 
-    // MARK: - Mapping
-
-    var totalWeight: Int {
-        segments.reduce(0) { acc, s in
-            acc + (s.isDense ? s.minuteSpan : compressedSegmentWeight)
-        }
-    }
+    var totalWeight: Double { hourWeights.reduce(0, +) }
 
     func x(forMinute minute: Int, totalWidth: CGFloat) -> CGFloat {
         let m = max(0, min(1440, minute))
-        let total = max(1, totalWeight)
-        let unit = totalWidth / CGFloat(total)
-        var used = 0
-        for s in segments {
-            if m <= s.endMinute {
-                let segWeight = s.isDense ? s.minuteSpan : compressedSegmentWeight
-                let fraction: CGFloat = s.minuteSpan == 0
-                    ? 0
-                    : CGFloat(m - s.startMinute) / CGFloat(s.minuteSpan)
-                return (CGFloat(used) + fraction * CGFloat(segWeight)) * unit
-            }
-            used += s.isDense ? s.minuteSpan : compressedSegmentWeight
-        }
-        return totalWidth
+        let h = min(23, m / 60)
+        let within = m - h * 60
+        let total = max(0.0001, totalWeight)
+        let unit = Double(totalWidth) / total
+        var used: Double = 0
+        for i in 0..<h { used += hourWeights[i] }
+        used += hourWeights[h] * Double(within) / 60.0
+        return CGFloat(used * unit)
     }
 
-    /// Hour-boundary tick positions across all dense segments, plus the start/end of each
-    /// compressed segment so the user can read where the skip starts and ends.
+    /// 25 ticks: one for each hour boundary 0…23 plus a closing tick at minute 1440.
     func hourTicks(totalWidth: CGFloat) -> [HourTick] {
-        var raw: [(Int, CGFloat, Bool)] = []
-        for s in segments {
-            if s.isDense {
-                let firstHour = (s.startMinute + 59) / 60
-                let lastHour = s.endMinute / 60
-                if firstHour <= lastHour {
-                    for h in firstHour...lastHour {
-                        let m = h * 60
-                        raw.append((m, x(forMinute: m, totalWidth: totalWidth), false))
-                    }
-                }
-            } else {
-                raw.append((s.startMinute, x(forMinute: s.startMinute, totalWidth: totalWidth), true))
-                raw.append((s.endMinute, x(forMinute: s.endMinute, totalWidth: totalWidth), true))
-            }
+        let total = max(0.0001, totalWeight)
+        let unit = Double(totalWidth) / total
+        var ticks: [HourTick] = []
+        var used: Double = 0
+        for h in 0..<24 {
+            let xv = CGFloat(used * unit)
+            let width = CGFloat(hourWeights[h] * unit)
+            let isEmpty = abs(hourWeights[h] - baseWeight) < 0.0001
+            ticks.append(HourTick(
+                id: h * 60, minute: h * 60, x: xv, width: width, isEmpty: isEmpty
+            ))
+            used += hourWeights[h]
         }
-        var out: [HourTick] = []
-        for (m, xv, comp) in raw {
-            if out.last?.minute == m { continue }
-            out.append(HourTick(id: m, minute: m, x: xv, isCompressedBoundary: comp))
-        }
-        return out
-    }
-
-    func compressedRanges(totalWidth: CGFloat) -> [CompressedRange] {
-        segments
-            .filter { !$0.isDense }
-            .map { s in
-                CompressedRange(
-                    id: s.startMinute,
-                    startMinute: s.startMinute,
-                    endMinute: s.endMinute,
-                    startX: x(forMinute: s.startMinute, totalWidth: totalWidth),
-                    endX: x(forMinute: s.endMinute, totalWidth: totalWidth)
-                )
-            }
+        ticks.append(HourTick(
+            id: 1440, minute: 1440, x: CGFloat(used * unit), width: 0, isEmpty: false
+        ))
+        return ticks
     }
 
     static func hourLabel(_ minute: Int) -> String {
@@ -176,19 +80,17 @@ struct TimeAxis: Equatable {
     }
 }
 
-/// Pre-computed positions for a given width. Holding one of these in the parent view
-/// avoids each row recomputing the same tick layout in its body.
+/// Pre-computed positions for a given width. Holding one of these in the parent avoids
+/// each row recomputing the same tick layout in its body.
 struct AxisLayout: Equatable {
     let axis: TimeAxis
     let width: CGFloat
     let hourTicks: [TimeAxis.HourTick]
-    let compressedRanges: [TimeAxis.CompressedRange]
 
     init(axis: TimeAxis, width: CGFloat) {
         self.axis = axis
         self.width = width
         self.hourTicks = axis.hourTicks(totalWidth: width)
-        self.compressedRanges = axis.compressedRanges(totalWidth: width)
     }
 
     func x(forMinute m: Int) -> CGFloat { axis.x(forMinute: m, totalWidth: width) }

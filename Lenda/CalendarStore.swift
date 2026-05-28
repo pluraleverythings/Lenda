@@ -141,12 +141,20 @@ final class CalendarStore: ObservableObject {
     }
 
     private func buildAxis(from buckets: [DayBucket]) -> TimeAxis {
-        let intervals: [(Int, Int)] = buckets.flatMap { bucket in
-            bucket.timedEvents.map { ($0.startMinute, $0.endMinute) }
+        var counts = Array(repeating: 0, count: 24)
+        for bucket in buckets {
+            for event in bucket.timedEvents {
+                let s = max(0, min(1440, event.startMinute))
+                let e = max(s + 1, min(1440, event.endMinute))
+                let startHour = min(23, s / 60)
+                let endHour = min(23, (e - 1) / 60)
+                for h in startHour...endHour { counts[h] += 1 }
+            }
         }
-        if intervals.isEmpty {
-            return TimeAxis.build(from: [(7 * 60, 22 * 60)])
+        // An empty calendar gets a business-hours bias so the axis is still meaningful.
+        if !counts.contains(where: { $0 > 0 }) {
+            for h in 7..<22 { counts[h] = 1 }
         }
-        return TimeAxis.build(from: intervals)
+        return TimeAxis.build(from: counts)
     }
 }
