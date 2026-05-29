@@ -9,6 +9,9 @@ struct TimeAxis: Equatable {
     /// Width weights for hours 0…23. Larger = wider on screen.
     let hourWeights: [Double]
     let baseWeight: Double
+    /// Prefix sums of `hourWeights`; `cumulativeWeights[h] == sum(hourWeights[0..<h])`.
+    /// Size 25. Lets `x(forMinute:)` run in O(1).
+    let cumulativeWeights: [Double]
 
     struct HourTick: Identifiable, Equatable {
         let id: Int
@@ -30,10 +33,18 @@ struct TimeAxis: Equatable {
             ? hourEventCounts
             : Array(repeating: 0, count: 24)
         let weights = counts.map { baseWeight + countScale * Double($0) }
-        return TimeAxis(hourWeights: weights, baseWeight: baseWeight)
+        var cumulative: [Double] = []
+        cumulative.reserveCapacity(25)
+        cumulative.append(0)
+        var running: Double = 0
+        for w in weights {
+            running += w
+            cumulative.append(running)
+        }
+        return TimeAxis(hourWeights: weights, baseWeight: baseWeight, cumulativeWeights: cumulative)
     }
 
-    var totalWeight: Double { hourWeights.reduce(0, +) }
+    var totalWeight: Double { cumulativeWeights.last ?? 0 }
 
     func x(forMinute minute: Int, totalWidth: CGFloat) -> CGFloat {
         let m = max(0, min(1440, minute))
@@ -41,9 +52,7 @@ struct TimeAxis: Equatable {
         let within = m - h * 60
         let total = max(0.0001, totalWeight)
         let unit = Double(totalWidth) / total
-        var used: Double = 0
-        for i in 0..<h { used += hourWeights[i] }
-        used += hourWeights[h] * Double(within) / 60.0
+        let used = cumulativeWeights[h] + hourWeights[h] * Double(within) / 60.0
         return CGFloat(used * unit)
     }
 
@@ -52,18 +61,17 @@ struct TimeAxis: Equatable {
         let total = max(0.0001, totalWeight)
         let unit = Double(totalWidth) / total
         var ticks: [HourTick] = []
-        var used: Double = 0
+        ticks.reserveCapacity(25)
         for h in 0..<24 {
-            let xv = CGFloat(used * unit)
+            let xv = CGFloat(cumulativeWeights[h] * unit)
             let width = CGFloat(hourWeights[h] * unit)
             let isEmpty = abs(hourWeights[h] - baseWeight) < 0.0001
             ticks.append(HourTick(
                 id: h * 60, minute: h * 60, x: xv, width: width, isEmpty: isEmpty
             ))
-            used += hourWeights[h]
         }
         ticks.append(HourTick(
-            id: 1440, minute: 1440, x: CGFloat(used * unit), width: 0, isEmpty: false
+            id: 1440, minute: 1440, x: CGFloat(totalWeight * unit), width: 0, isEmpty: false
         ))
         return ticks
     }
@@ -86,11 +94,16 @@ struct AxisLayout: Equatable {
     let axis: TimeAxis
     let width: CGFloat
     let hourTicks: [TimeAxis.HourTick]
+    /// Pre-filtered subset of `hourTicks` that the LazyVStack background shades.
+    /// Cached so the filter doesn't run on every body evaluation during scroll.
+    let emptyHourTicks: [TimeAxis.HourTick]
 
     init(axis: TimeAxis, width: CGFloat) {
         self.axis = axis
         self.width = width
-        self.hourTicks = axis.hourTicks(totalWidth: width)
+        let ticks = axis.hourTicks(totalWidth: width)
+        self.hourTicks = ticks
+        self.emptyHourTicks = ticks.filter { $0.isEmpty && $0.width > 0 }
     }
 
     func x(forMinute m: Int) -> CGFloat { axis.x(forMinute: m, totalWidth: width) }

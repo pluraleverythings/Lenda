@@ -9,9 +9,10 @@ struct CalendarTimelineView: View {
     @State private var topDayID: Date?
     @State private var focusedDayID: Date?
     @State private var didAnchorOnToday = false
-    /// Each `topDayID` change generates a new token; the focused row only updates if
-    /// no further scroll happens before the debounce delay elapses.
-    @State private var focusToken = UUID()
+    /// Debounce timer for promoting `topDayID` to `focusedDayID` after the scroll
+    /// settles. Stored as a cancellable work item so we don't pile up pending
+    /// asyncAfter closures during fast scrolling.
+    @State private var focusWorkItem: DispatchWorkItem?
 
     var body: some View {
         switch store.access {
@@ -65,22 +66,7 @@ struct CalendarTimelineView: View {
                         // them. Below the focused row, they form a continuous grid the
                         // eye can follow top-to-bottom.
                         .background(alignment: .topLeading) {
-                            ZStack(alignment: .topLeading) {
-                                ForEach(layout.hourTicks.filter { $0.isEmpty && $0.width > 0 }) { tick in
-                                    Rectangle()
-                                        .fill(DR.surfaceCompressed)
-                                        .frame(width: tick.width)
-                                        .offset(x: leftInset + tick.x)
-                                }
-                                ForEach(layout.hourTicks) { tick in
-                                    Rectangle()
-                                        .fill(DR.rule)
-                                        .frame(width: DR.hairline)
-                                        .offset(x: leftInset + tick.x)
-                                }
-                            }
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                            .allowsHitTesting(false)
+                            TimelineGridBackground(layout: layout, leftInset: leftInset)
                         }
                     }
                     .scrollTargetBehavior(.viewAligned(limitBehavior: .always))
@@ -93,11 +79,10 @@ struct CalendarTimelineView: View {
                         // expanded card view. During the scroll itself every row stays
                         // compact, which keeps the LazyVStack geometry stable so snap
                         // aligns cleanly to row boundaries.
-                        let token = UUID()
-                        focusToken = token
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                            if focusToken == token { focusedDayID = newTop }
-                        }
+                        focusWorkItem?.cancel()
+                        let item = DispatchWorkItem { focusedDayID = newTop }
+                        focusWorkItem = item
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: item)
                     }
                     .onAppear {
                         if !didAnchorOnToday {
@@ -128,5 +113,33 @@ struct CalendarTimelineView: View {
 
     private func extendBy(months: Int, from date: Date) -> Date {
         Calendar.current.date(byAdding: .month, value: months, to: date) ?? date
+    }
+}
+
+/// The shared timeline grid (empty-hour shading + hour gridlines) drawn once behind
+/// the LazyVStack. Extracted into its own Equatable view so SwiftUI can skip
+/// re-evaluating these dozens of Rectangles every time `topDayID` changes during a
+/// scroll — the inputs (layout, leftInset) stay the same.
+private struct TimelineGridBackground: View, Equatable {
+    let layout: AxisLayout
+    let leftInset: CGFloat
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            ForEach(layout.emptyHourTicks) { tick in
+                Rectangle()
+                    .fill(DR.surfaceCompressed)
+                    .frame(width: tick.width)
+                    .offset(x: leftInset + tick.x)
+            }
+            ForEach(layout.hourTicks) { tick in
+                Rectangle()
+                    .fill(DR.rule)
+                    .frame(width: DR.hairline)
+                    .offset(x: leftInset + tick.x)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .allowsHitTesting(false)
     }
 }
