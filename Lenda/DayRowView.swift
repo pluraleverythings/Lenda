@@ -86,9 +86,10 @@ struct DayRowView: View {
 
     private var track: some View {
         let items = LanePacker.pack(day.timedEvents)
-        let nextOnLane = computeNextOnLane(items)
+        let placements = computePlacements(for: items)
         return ZStack(alignment: .topLeading) {
-            // Shade hours with no activity so dead time is visible.
+            // Background: shade hours that hosted no events anywhere in the loaded
+            // window. Drawn first so events sit on top.
             ForEach(layout.hourTicks.filter { $0.isEmpty && $0.width > 0 }) { tick in
                 Rectangle()
                     .fill(DR.surfaceCompressed)
@@ -96,18 +97,19 @@ struct DayRowView: View {
                     .offset(x: tick.x)
             }
 
-            // Hour gridlines
+            // Events
+            ForEach(items, id: \.event.id) { item in
+                eventView(for: item, placement: placements[item.event.id] ?? .none)
+            }
+
+            // Hour gridlines drawn ABOVE events so the shared grid is always visible
+            // and stays continuous across every day row.
             ForEach(layout.hourTicks) { tick in
                 Rectangle()
                     .fill(DR.rule)
                     .frame(width: DR.hairline)
                     .offset(x: tick.x)
                     .allowsHitTesting(false)
-            }
-
-            // Events
-            ForEach(items, id: \.event.id) { item in
-                eventView(for: item, nextStartMinute: nextOnLane[item.event.id] ?? 1440)
             }
 
             // Now indicator on today only
@@ -127,7 +129,7 @@ struct DayRowView: View {
     }
 
     @ViewBuilder
-    private func eventView(for item: LanePacker.Item, nextStartMinute: Int) -> some View {
+    private func eventView(for item: LanePacker.Item, placement: LabelPlacement) -> some View {
         let startX = layout.x(forMinute: item.event.startMinute)
         let endX = layout.x(forMinute: item.event.endMinute)
         let blockWidth = max(3, endX - startX)
@@ -136,32 +138,34 @@ struct DayRowView: View {
         let topY = 8 + CGFloat(item.lane) * laneHeight
         let blockHeight = laneHeight - 2
 
-        let nextStartX = layout.x(forMinute: nextStartMinute)
-        let gapWidth = max(0, nextStartX - endX)
-
-        let insideMin: CGFloat = 50
-        let externalMin: CGFloat = 44
-        let externalLabelWidth: CGFloat = {
-            if blockWidth >= insideMin { return 0 }
-            if gapWidth >= externalMin { return gapWidth - 4 }
+        let leftLabelWidth: CGFloat = {
+            if case .left(let w) = placement { return w }
             return 0
         }()
-        let showInsideLabel = blockWidth >= insideMin
+        let hStackOffsetX = startX - (leftLabelWidth > 0 ? leftLabelWidth + 4 : 0)
 
         HStack(spacing: 4) {
-            EventBlock(event: item.event, showLabel: showInsideLabel)
-                .frame(width: blockWidth, height: blockHeight)
-            if externalLabelWidth > 0 {
+            if case .left(let w) = placement {
                 Text(item.event.title)
                     .font(DR.TypeStyle.eventTitle)
                     .foregroundStyle(DR.ink)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                    .frame(width: externalLabelWidth, height: blockHeight, alignment: .leading)
+                    .frame(width: w, height: blockHeight, alignment: .trailing)
+            }
+            EventBlock(event: item.event, showLabel: placement == .inside)
+                .frame(width: blockWidth, height: blockHeight)
+            if case .right(let w) = placement {
+                Text(item.event.title)
+                    .font(DR.TypeStyle.eventTitle)
+                    .foregroundStyle(DR.ink)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(width: w, height: blockHeight, alignment: .leading)
             }
         }
         .contentShape(Rectangle())
-        .offset(x: startX, y: topY)
+        .offset(x: hStackOffsetX, y: topY)
         .onTapGesture { selectedEvent = item.event }
         .popover(
             isPresented: Binding(
@@ -194,18 +198,56 @@ struct DayRowView: View {
         .presentationCompactAdaptation(.popover)
     }
 
-    private func computeNextOnLane(_ items: [LanePacker.Item]) -> [String: Int] {
-        var result: [String: Int] = [:]
+    // MARK: - Label placement
+
+    private enum LabelPlacement: Equatable {
+        case inside
+        case right(width: CGFloat)
+        case left(width: CGFloat)
+        case none
+    }
+
+    /// Decide where each event's title sits. Priority inside → right → left; an event
+    /// only uses the gap to its left if the previous event on the lane didn't already
+    /// claim that gap with a right label.
+    private func computePlacements(for items: [LanePacker.Item]) -> [String: LabelPlacement] {
+        let insideMin: CGFloat = 32
+        let externalMin: CGFloat = 32
+
+        var result: [String: LabelPlacement] = [:]
         let groups = Dictionary(grouping: items, by: \.lane)
         for (_, group) in groups {
             let sorted = group.sorted { $0.event.startMinute < $1.event.startMinute }
-            for (i, item) in sorted.enumerated() {
-                result[item.event.id] = i + 1 < sorted.count
-                    ? sorted[i + 1].event.startMinute
-                    : 1440
+            var prev: LabelPlacement = .none
+            for (i, cur) in sorted.enumerated() {
+                let startX = layout.x(forMinute: cur.event.startMinute)
+                let endX = layout.x(forMinute: cur.event.endMinute)
+                let blockWidth = max(3, endX - startX)
+
+                let prevEnd = i > 0 ? sorted[i - 1].event.endMinute : 0
+                let nextStart = i + 1 < sorted.count ? sorted[i + 1].event.startMinute : 1440
+                let leftGap = max(0, startX - layout.x(forMinute: prevEnd))
+                let rightGap = max(0, layout.x(forMinute: nextStart) - endX)
+
+                let placement: LabelPlacement
+                if blockWidth >= insideMin {
+                    placement = .inside
+                } else if rightGap >= externalMin {
+                    placement = .right(width: rightGap - 4)
+                } else if leftGap >= externalMin, !Self.isRight(prev) {
+                    placement = .left(width: leftGap - 4)
+                } else {
+                    placement = .none
+                }
+                result[cur.event.id] = placement
+                prev = placement
             }
         }
         return result
+    }
+
+    private static func isRight(_ p: LabelPlacement) -> Bool {
+        if case .right = p { return true } else { return false }
     }
 
     private func currentMinuteOfDay() -> Int {
