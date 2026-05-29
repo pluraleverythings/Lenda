@@ -77,7 +77,7 @@ struct CalendarTimelineView: View {
                             .allowsHitTesting(false)
                         }
                     }
-                    .scrollTargetBehavior(.viewAligned(limitBehavior: .alwaysByFew))
+                    .scrollTargetBehavior(.viewAligned(limitBehavior: .always))
                     .scrollPosition(id: $topDayID, anchor: .top)
                     .onChange(of: topDayID) { _, newTop in
                         if let newTop { store.ensureLoaded(around: newTop) }
