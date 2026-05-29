@@ -41,30 +41,30 @@ struct DayRowView: View {
                 // of the focused row and travel with it as the user scrolls.
                 hoursBar.transition(.opacity)
             }
+            // Row separator lives inside the row so each DayRowView is exactly one
+            // scroll-snap target; scroll alignment matches the row's visible top edge.
+            Rectangle()
+                .fill(DR.rule)
+                .frame(height: DR.hairline)
         }
         // Focused rows draw their own opaque surface so the global timeline grid
         // (drawn behind the LazyVStack) doesn't bleed through the cards or the hour bar.
         .background(isFocused ? DR.surface : Color.clear)
-        .animation(.spring(response: 0.32, dampingFraction: 0.85), value: isFocused)
+        .animation(.snappy(duration: 0.25), value: isFocused)
         .sheet(isPresented: $showingSummary) {
             DaySummarySheet(day: day)
         }
     }
 
     private var hoursBar: some View {
-        VStack(spacing: 0) {
-            HStack(alignment: .top, spacing: 8) {
-                Spacer().frame(width: DR.dayLabelWidth)
-                TimeAxisHeader(layout: layout)
-                    .frame(height: DR.timeHeaderHeight)
-            }
-            .padding(.horizontal, DR.horizontalPadding)
-            .padding(.top, 4)
-            .padding(.bottom, 2)
-            Rectangle()
-                .fill(DR.rule)
-                .frame(height: DR.hairline)
+        HStack(alignment: .top, spacing: 8) {
+            Spacer().frame(width: DR.dayLabelWidth)
+            TimeAxisHeader(layout: layout)
+                .frame(height: DR.timeHeaderHeight)
         }
+        .padding(.horizontal, DR.horizontalPadding)
+        .padding(.top, 4)
+        .padding(.bottom, 2)
     }
 
     // MARK: - Day label
@@ -135,63 +135,105 @@ struct DayRowView: View {
 
     @ViewBuilder
     private var focusedTrack: some View {
-        let all = day.allDayEvents + day.timedEvents.sorted { $0.startMinute < $1.startMinute }
-        if all.isEmpty {
-            Text("No events")
-                .font(.system(size: 13))
-                .foregroundStyle(DR.inkSecondary)
-                .padding(.top, 12)
-                .padding(.leading, 4)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        } else {
-            VStack(alignment: .leading, spacing: 4) {
-                ForEach(Array(all.prefix(6))) { ev in
-                    focusedCard(ev)
-                }
-                if all.count > 6 {
-                    Text("+ \(all.count - 6) more")
-                        .font(.system(size: 11))
-                        .foregroundStyle(DR.inkSecondary)
-                        .padding(.leading, 8)
-                        .padding(.top, 2)
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(.vertical, 8)
-        }
-    }
+        let sorted = day.timedEvents.sorted { $0.startMinute < $1.startMinute }
+        let morning = sorted.filter { $0.startMinute < 12 * 60 }
+        let afternoon = sorted.filter { $0.startMinute >= 12 * 60 }
+        let nothing = day.allDayEvents.isEmpty && sorted.isEmpty
 
-    private func focusedCard(_ ev: DayEvent) -> some View {
-        HStack(spacing: 8) {
-            Rectangle().fill(ev.color).frame(width: 4)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(ev.title)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(DR.ink)
-                    .lineLimit(1)
-                if ev.isAllDay {
-                    Text("All-day")
-                        .font(.system(size: 11))
-                        .foregroundStyle(DR.inkSecondary)
-                } else {
-                    Text("\(TimeAxis.hourLabel(ev.startMinute))–\(TimeAxis.hourLabel(ev.endMinute))")
-                        .font(.system(size: 11))
-                        .foregroundStyle(DR.inkSecondary)
-                }
-                if let loc = ev.location, !loc.isEmpty {
-                    Text(loc)
-                        .font(.system(size: 11))
-                        .foregroundStyle(DR.inkTertiary)
-                        .lineLimit(1)
-                }
+        VStack(alignment: .leading, spacing: 10) {
+            if !day.allDayEvents.isEmpty {
+                allDayInlineRow
+            }
+            if !sorted.isEmpty {
+                timeOfDaySection(title: "Morning", events: morning)
+                timeOfDaySection(title: "Afternoon", events: afternoon)
+            }
+            if nothing {
+                Text("No events")
+                    .font(.system(size: 13))
+                    .foregroundStyle(DR.inkSecondary)
+                    .padding(.top, 4)
             }
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 8)
         .padding(.vertical, 6)
+    }
+
+    private var allDayInlineRow: some View {
+        HStack(spacing: 10) {
+            ForEach(day.allDayEvents) { ev in
+                allDayChip(ev)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func allDayChip(_ ev: DayEvent) -> some View {
+        HStack(spacing: 4) {
+            Circle().fill(ev.color).frame(width: 5, height: 5)
+            Text(ev.title)
+                .font(.system(size: 11))
+                .foregroundStyle(DR.ink)
+                .lineLimit(1)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { selectedEvent = ev }
+        .popover(
+            isPresented: Binding(
+                get: { selectedEvent?.id == ev.id },
+                set: { presenting in if !presenting { selectedEvent = nil } }
+            )
+        ) {
+            eventPopoverContent(ev)
+        }
+    }
+
+    private func timeOfDaySection(title: String, events: [DayEvent]) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title.uppercased())
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(DR.inkSecondary)
+                .tracking(0.6)
+            if events.isEmpty {
+                Text("—")
+                    .font(.system(size: 11))
+                    .foregroundStyle(DR.inkTertiary)
+            } else {
+                let shown = Array(events.prefix(4))
+                let overflow = events.count - shown.count
+                HStack(spacing: 6) {
+                    ForEach(shown) { ev in
+                        focusedHorizontalCard(ev)
+                    }
+                    if overflow > 0 {
+                        Text("+\(overflow)")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(DR.inkSecondary)
+                    }
+                }
+            }
+        }
+    }
+
+    private func focusedHorizontalCard(_ ev: DayEvent) -> some View {
+        HStack(spacing: 6) {
+            Rectangle().fill(ev.color).frame(width: 3)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(ev.title)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(DR.ink)
+                    .lineLimit(1)
+                Text(TimeAxis.hourLabel(ev.startMinute))
+                    .font(.system(size: 10))
+                    .foregroundStyle(DR.inkSecondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 5)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(ev.color.opacity(0.12))
-        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .clipShape(RoundedRectangle(cornerRadius: 5))
         .contentShape(Rectangle())
         .onTapGesture { selectedEvent = ev }
         .popover(
