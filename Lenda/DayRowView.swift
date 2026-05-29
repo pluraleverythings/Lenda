@@ -140,13 +140,21 @@ struct DayRowView: View {
         let afternoon = sorted.filter { $0.startMinute >= 12 * 60 }
         let nothing = day.allDayEvents.isEmpty && sorted.isEmpty
 
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             if !day.allDayEvents.isEmpty {
                 allDayInlineRow
             }
             if !sorted.isEmpty {
-                timeOfDaySection(title: "Morning", events: morning)
-                timeOfDaySection(title: "Afternoon", events: afternoon)
+                HStack(alignment: .top, spacing: 0) {
+                    timeOfDayColumn(title: "Morning", events: morning)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                    Rectangle()
+                        .fill(DR.rule)
+                        .frame(width: DR.hairline)
+                        .padding(.horizontal, 6)
+                    timeOfDayColumn(title: "Afternoon", events: afternoon)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                }
             }
             if nothing {
                 Text("No events")
@@ -188,7 +196,7 @@ struct DayRowView: View {
         }
     }
 
-    private func timeOfDaySection(title: String, events: [DayEvent]) -> some View {
+    private func timeOfDayColumn(title: String, events: [DayEvent]) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title.uppercased())
                 .font(.system(size: 9, weight: .semibold))
@@ -201,15 +209,14 @@ struct DayRowView: View {
             } else {
                 let shown = Array(events.prefix(4))
                 let overflow = events.count - shown.count
-                HStack(spacing: 6) {
-                    ForEach(shown) { ev in
-                        focusedHorizontalCard(ev)
-                    }
-                    if overflow > 0 {
-                        Text("+\(overflow)")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(DR.inkSecondary)
-                    }
+                ForEach(shown) { ev in
+                    focusedHorizontalCard(ev)
+                }
+                if overflow > 0 {
+                    Text("+\(overflow)")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(DR.inkSecondary)
+                        .padding(.leading, 6)
                 }
             }
         }
