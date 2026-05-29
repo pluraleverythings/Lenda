@@ -2,7 +2,8 @@ import SwiftUI
 
 /// Root timeline. Vertical list of day rows, today at the top on first appearance,
 /// scrollable in both directions. A horizontal month bar at the top tracks/jumps to
-/// whichever day is at the top of the viewport.
+/// whichever day is at the top of the viewport. The hour-axis labels live inside the
+/// focused (top) row — see DayRowView.
 struct CalendarTimelineView: View {
     @EnvironmentObject var store: CalendarStore
     @State private var topDayID: Date?
@@ -39,38 +40,29 @@ struct CalendarTimelineView: View {
                     .fill(DR.rule)
                     .frame(height: DR.hairline)
 
-                HStack(alignment: .top, spacing: 8) {
-                    Spacer().frame(width: DR.dayLabelWidth)
-                    TimeAxisHeader(layout: layout)
-                        .frame(height: DR.timeHeaderHeight)
-                }
-                .padding(.horizontal, DR.horizontalPadding)
-                .padding(.top, 4)
-                .padding(.bottom, 2)
-
-                Rectangle()
-                    .fill(DR.rule)
-                    .frame(height: DR.hairline)
-
                 ScrollViewReader { scroller in
                     let leftInset = DR.horizontalPadding + DR.dayLabelWidth + 8
                     ScrollView {
                         LazyVStack(spacing: 0) {
                             ForEach(store.days) { day in
-                                DayRowView(
-                                    day: day,
-                                    layout: layout,
-                                    isFocused: day.id == topDayID
-                                )
+                                VStack(spacing: 0) {
+                                    DayRowView(
+                                        day: day,
+                                        layout: layout,
+                                        isFocused: day.id == topDayID
+                                    )
+                                    Rectangle()
+                                        .fill(DR.rule)
+                                        .frame(height: DR.hairline)
+                                }
                                 .id(day.id)
-                                Rectangle()
-                                    .fill(DR.rule)
-                                    .frame(height: DR.hairline)
                             }
                         }
                         .scrollTargetLayout()
-                        // Empty-hour shading drawn once across the whole timeline so
-                        // the "dead time" columns are continuous from top to bottom.
+                        // Shading and gridlines live in the LazyVStack background so the
+                        // focused row's opaque surface (and the embedded hour bar) cover
+                        // them. Below the focused row, they form a continuous grid the
+                        // eye can follow top-to-bottom.
                         .background(alignment: .topLeading) {
                             ZStack(alignment: .topLeading) {
                                 ForEach(layout.hourTicks.filter { $0.isEmpty && $0.width > 0 }) { tick in
@@ -79,14 +71,6 @@ struct CalendarTimelineView: View {
                                         .frame(width: tick.width)
                                         .offset(x: leftInset + tick.x)
                                 }
-                            }
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                            .allowsHitTesting(false)
-                        }
-                        // Hour gridlines drawn once on top of every row so they form a
-                        // single continuous grid the eye can follow top-to-bottom.
-                        .overlay(alignment: .topLeading) {
-                            ZStack(alignment: .topLeading) {
                                 ForEach(layout.hourTicks) { tick in
                                     Rectangle()
                                         .fill(DR.rule)
@@ -98,10 +82,8 @@ struct CalendarTimelineView: View {
                             .allowsHitTesting(false)
                         }
                     }
+                    .scrollTargetBehavior(.viewAligned)
                     .scrollPosition(id: $topDayID, anchor: .top)
-                    // Expand only as the user scrolls the top of the viewport near an
-                    // edge. Driving this off the scroll position (not every row's
-                    // onAppear) avoids a reload→re-create→onAppear→reload feedback loop.
                     .onChange(of: topDayID) { _, newTop in
                         if let newTop { store.ensureLoaded(around: newTop) }
                     }

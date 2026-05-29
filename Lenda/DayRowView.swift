@@ -21,25 +21,49 @@ struct DayRowView: View {
     }()
 
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            dayLabel
-                .frame(width: DR.dayLabelWidth, height: rowHeight, alignment: .topLeading)
-            Group {
-                if isFocused {
-                    focusedTrack.transition(.opacity)
-                } else {
-                    track.transition(.opacity)
+        VStack(spacing: 0) {
+            HStack(alignment: .top, spacing: 8) {
+                dayLabel
+                    .frame(width: DR.dayLabelWidth, height: rowHeight, alignment: .topLeading)
+                Group {
+                    if isFocused {
+                        focusedTrack.transition(.opacity)
+                    } else {
+                        track.transition(.opacity)
+                    }
                 }
+                .frame(width: layout.width, height: rowHeight, alignment: .topLeading)
             }
-            .frame(width: layout.width, height: rowHeight, alignment: .topLeading)
+            .padding(.horizontal, DR.horizontalPadding)
+            if isFocused {
+                // The hour-axis labels belong to the timeline rows below the focused
+                // day, not the focused day's card list — so they live at the bottom
+                // of the focused row and travel with it as the user scrolls.
+                hoursBar.transition(.opacity)
+            }
         }
-        .padding(.horizontal, DR.horizontalPadding)
         // Focused rows draw their own opaque surface so the global timeline grid
-        // (drawn behind/over the LazyVStack) doesn't bleed through the cards.
+        // (drawn behind the LazyVStack) doesn't bleed through the cards or the hour bar.
         .background(isFocused ? DR.surface : Color.clear)
         .animation(.spring(response: 0.32, dampingFraction: 0.85), value: isFocused)
         .sheet(isPresented: $showingSummary) {
             DaySummarySheet(day: day)
+        }
+    }
+
+    private var hoursBar: some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .top, spacing: 8) {
+                Spacer().frame(width: DR.dayLabelWidth)
+                TimeAxisHeader(layout: layout)
+                    .frame(height: DR.timeHeaderHeight)
+            }
+            .padding(.horizontal, DR.horizontalPadding)
+            .padding(.top, 4)
+            .padding(.bottom, 2)
+            Rectangle()
+                .fill(DR.rule)
+                .frame(height: DR.hairline)
         }
     }
 
