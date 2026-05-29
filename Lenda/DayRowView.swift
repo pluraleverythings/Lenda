@@ -223,13 +223,14 @@ struct DayRowView: View {
     }
 
     private func focusedHorizontalCard(_ ev: DayEvent) -> some View {
-        HStack(spacing: 6) {
+        HStack(alignment: .top, spacing: 6) {
             Rectangle().fill(ev.color).frame(width: 3)
             VStack(alignment: .leading, spacing: 1) {
                 Text(ev.title)
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(DR.ink)
-                    .lineLimit(1)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
                 Text(TimeAxis.hourLabel(ev.startMinute))
                     .font(.system(size: 10))
                     .foregroundStyle(DR.inkSecondary)
@@ -300,21 +301,28 @@ struct DayRowView: View {
 
         HStack(spacing: 4) {
             if case .left(let w) = placement {
+                // Label sits to the LEFT of the event, so right-align the text
+                // (both each wrapped line and the text block) so it hugs the
+                // event's leading edge.
                 Text(item.event.title)
                     .font(DR.TypeStyle.eventTitle)
                     .foregroundStyle(DR.ink)
-                    .lineLimit(1)
+                    .lineLimit(2)
                     .truncationMode(.tail)
+                    .multilineTextAlignment(.trailing)
                     .frame(width: w, height: blockHeight, alignment: .trailing)
             }
             EventBlock(event: item.event, showLabel: placement == .inside)
                 .frame(width: blockWidth, height: blockHeight)
             if case .right(let w) = placement {
+                // Label sits to the RIGHT of the event, so left-align the text
+                // so it hugs the event's trailing edge.
                 Text(item.event.title)
                     .font(DR.TypeStyle.eventTitle)
                     .foregroundStyle(DR.ink)
-                    .lineLimit(1)
+                    .lineLimit(2)
                     .truncationMode(.tail)
+                    .multilineTextAlignment(.leading)
                     .frame(width: w, height: blockHeight, alignment: .leading)
             }
         }
