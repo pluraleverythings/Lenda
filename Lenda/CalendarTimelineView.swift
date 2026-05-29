@@ -7,7 +7,11 @@ import SwiftUI
 struct CalendarTimelineView: View {
     @EnvironmentObject var store: CalendarStore
     @State private var topDayID: Date?
+    @State private var focusedDayID: Date?
     @State private var didAnchorOnToday = false
+    /// Each `topDayID` change generates a new token; the focused row only updates if
+    /// no further scroll happens before the debounce delay elapses.
+    @State private var focusToken = UUID()
 
     var body: some View {
         switch store.access {
@@ -50,7 +54,7 @@ struct CalendarTimelineView: View {
                                 DayRowView(
                                     day: day,
                                     layout: layout,
-                                    isFocused: day.id == topDayID
+                                    isFocused: day.id == focusedDayID
                                 )
                                 .id(day.id)
                             }
@@ -84,6 +88,16 @@ struct CalendarTimelineView: View {
                     .scrollPosition(id: $topDayID, anchor: .top)
                     .onChange(of: topDayID) { _, newTop in
                         if let newTop { store.ensureLoaded(around: newTop) }
+                        // Debounce the focus expansion: only after the user stops
+                        // scrolling for 250ms do we animate the new top day into the
+                        // expanded card view. During the scroll itself every row stays
+                        // compact, which keeps the LazyVStack geometry stable so snap
+                        // aligns cleanly to row boundaries.
+                        let token = UUID()
+                        focusToken = token
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                            if focusToken == token { focusedDayID = newTop }
+                        }
                     }
                     .onAppear {
                         if !didAnchorOnToday {
@@ -91,6 +105,7 @@ struct CalendarTimelineView: View {
                             DispatchQueue.main.async {
                                 scroller.scrollTo(store.today, anchor: .top)
                                 topDayID = store.today
+                                focusedDayID = store.today
                             }
                         }
                     }
