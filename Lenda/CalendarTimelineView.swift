@@ -53,6 +53,7 @@ struct CalendarTimelineView: View {
                     .frame(height: DR.hairline)
 
                 ScrollViewReader { scroller in
+                    let leftInset = DR.horizontalPadding + DR.dayLabelWidth + 8
                     ScrollView {
                         LazyVStack(spacing: 0) {
                             ForEach(store.days) { day in
@@ -64,6 +65,34 @@ struct CalendarTimelineView: View {
                             }
                         }
                         .scrollTargetLayout()
+                        // Empty-hour shading drawn once across the whole timeline so
+                        // the "dead time" columns are continuous from top to bottom.
+                        .background(alignment: .topLeading) {
+                            ZStack(alignment: .topLeading) {
+                                ForEach(layout.hourTicks.filter { $0.isEmpty && $0.width > 0 }) { tick in
+                                    Rectangle()
+                                        .fill(DR.surfaceCompressed)
+                                        .frame(width: tick.width)
+                                        .offset(x: leftInset + tick.x)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                            .allowsHitTesting(false)
+                        }
+                        // Hour gridlines drawn once on top of every row so they form a
+                        // single continuous grid the eye can follow top-to-bottom.
+                        .overlay(alignment: .topLeading) {
+                            ZStack(alignment: .topLeading) {
+                                ForEach(layout.hourTicks) { tick in
+                                    Rectangle()
+                                        .fill(DR.rule)
+                                        .frame(width: DR.hairline)
+                                        .offset(x: leftInset + tick.x)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                            .allowsHitTesting(false)
+                        }
                     }
                     .scrollPosition(id: $topDayID, anchor: .top)
                     // Expand only as the user scrolls the top of the viewport near an

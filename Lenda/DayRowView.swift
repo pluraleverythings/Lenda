@@ -22,7 +22,6 @@ struct DayRowView: View {
                 .frame(width: layout.width, height: DR.dayRowHeight)
         }
         .padding(.horizontal, DR.horizontalPadding)
-        .background(DR.surface)
     }
 
     // MARK: - Day label
@@ -88,28 +87,11 @@ struct DayRowView: View {
         let items = LanePacker.pack(day.timedEvents)
         let placements = computePlacements(for: items)
         return ZStack(alignment: .topLeading) {
-            // Background: shade hours that hosted no events anywhere in the loaded
-            // window. Drawn first so events sit on top.
-            ForEach(layout.hourTicks.filter { $0.isEmpty && $0.width > 0 }) { tick in
-                Rectangle()
-                    .fill(DR.surfaceCompressed)
-                    .frame(width: tick.width)
-                    .offset(x: tick.x)
-            }
-
-            // Events
+            // Events. The empty-hour shading and the hour gridlines are drawn
+            // globally on the LazyVStack (see CalendarTimelineView) so they stay
+            // continuous from top to bottom across every day row.
             ForEach(items, id: \.event.id) { item in
                 eventView(for: item, placement: placements[item.event.id] ?? .none)
-            }
-
-            // Hour gridlines drawn ABOVE events so the shared grid is always visible
-            // and stays continuous across every day row.
-            ForEach(layout.hourTicks) { tick in
-                Rectangle()
-                    .fill(DR.rule)
-                    .frame(width: DR.hairline)
-                    .offset(x: tick.x)
-                    .allowsHitTesting(false)
             }
 
             // Now indicator on today only
