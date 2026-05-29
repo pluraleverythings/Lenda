@@ -3,10 +3,15 @@ import SwiftUI
 struct DayRowView: View {
     let day: DayBucket
     let layout: AxisLayout
+    var isFocused: Bool = false
 
     @State private var selectedEvent: DayEvent?
     @State private var showingAllDayList = false
     @State private var showingSummary = false
+
+    private var rowHeight: CGFloat {
+        isFocused ? DR.dayRowHeight * 3 : DR.dayRowHeight
+    }
 
     private static let weekdayFmt: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "EEE"; return f
@@ -18,11 +23,21 @@ struct DayRowView: View {
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
             dayLabel
-                .frame(width: DR.dayLabelWidth, height: DR.dayRowHeight, alignment: .topLeading)
-            track
-                .frame(width: layout.width, height: DR.dayRowHeight)
+                .frame(width: DR.dayLabelWidth, height: rowHeight, alignment: .topLeading)
+            Group {
+                if isFocused {
+                    focusedTrack.transition(.opacity)
+                } else {
+                    track.transition(.opacity)
+                }
+            }
+            .frame(width: layout.width, height: rowHeight, alignment: .topLeading)
         }
         .padding(.horizontal, DR.horizontalPadding)
+        // Focused rows draw their own opaque surface so the global timeline grid
+        // (drawn behind/over the LazyVStack) doesn't bleed through the cards.
+        .background(isFocused ? DR.surface : Color.clear)
+        .animation(.spring(response: 0.32, dampingFraction: 0.85), value: isFocused)
         .sheet(isPresented: $showingSummary) {
             DaySummarySheet(day: day)
         }
@@ -89,6 +104,79 @@ struct DayRowView: View {
             }
             .padding(12)
             .presentationCompactAdaptation(.popover)
+        }
+    }
+
+    // MARK: - Focused track (the expanded top row)
+
+    @ViewBuilder
+    private var focusedTrack: some View {
+        let all = day.allDayEvents + day.timedEvents.sorted { $0.startMinute < $1.startMinute }
+        if all.isEmpty {
+            Text("No events")
+                .font(.system(size: 13))
+                .foregroundStyle(DR.inkSecondary)
+                .padding(.top, 12)
+                .padding(.leading, 4)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(Array(all.prefix(6))) { ev in
+                    focusedCard(ev)
+                }
+                if all.count > 6 {
+                    Text("+ \(all.count - 6) more")
+                        .font(.system(size: 11))
+                        .foregroundStyle(DR.inkSecondary)
+                        .padding(.leading, 8)
+                        .padding(.top, 2)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.vertical, 8)
+        }
+    }
+
+    private func focusedCard(_ ev: DayEvent) -> some View {
+        HStack(spacing: 8) {
+            Rectangle().fill(ev.color).frame(width: 4)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(ev.title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(DR.ink)
+                    .lineLimit(1)
+                if ev.isAllDay {
+                    Text("All-day")
+                        .font(.system(size: 11))
+                        .foregroundStyle(DR.inkSecondary)
+                } else {
+                    Text("\(TimeAxis.hourLabel(ev.startMinute))–\(TimeAxis.hourLabel(ev.endMinute))")
+                        .font(.system(size: 11))
+                        .foregroundStyle(DR.inkSecondary)
+                }
+                if let loc = ev.location, !loc.isEmpty {
+                    Text(loc)
+                        .font(.system(size: 11))
+                        .foregroundStyle(DR.inkTertiary)
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(ev.color.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .contentShape(Rectangle())
+        .onTapGesture { selectedEvent = ev }
+        .popover(
+            isPresented: Binding(
+                get: { selectedEvent?.id == ev.id },
+                set: { presenting in if !presenting { selectedEvent = nil } }
+            )
+        ) {
+            eventPopoverContent(ev)
         }
     }
 

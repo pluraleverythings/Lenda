@@ -57,8 +57,12 @@ struct CalendarTimelineView: View {
                     ScrollView {
                         LazyVStack(spacing: 0) {
                             ForEach(store.days) { day in
-                                DayRowView(day: day, layout: layout)
-                                    .id(day.id)
+                                DayRowView(
+                                    day: day,
+                                    layout: layout,
+                                    isFocused: day.id == topDayID
+                                )
+                                .id(day.id)
                                 Rectangle()
                                     .fill(DR.rule)
                                     .frame(height: DR.hairline)
