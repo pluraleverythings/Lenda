@@ -32,7 +32,9 @@ struct CalendarTimelineView: View {
                 MonthBar(
                     months: store.monthsInRange,
                     currentMonth: currentMonth,
-                    onSelect: jump(to:)
+                    onSelect: jump(to:),
+                    onReachStart: { month in store.ensureLoaded(around: extendBy(months: -3, from: month)) },
+                    onReachEnd: { month in store.ensureLoaded(around: extendBy(months: 3, from: month)) }
                 )
                 .frame(height: DR.monthBarHeight)
 
@@ -78,6 +80,7 @@ struct CalendarTimelineView: View {
                         }
                     }
                     .scrollTargetBehavior(.viewAligned(limitBehavior: .always))
+                    .contentMargins(.top, 0, for: .scrollContent)
                     .scrollPosition(id: $topDayID, anchor: .top)
                     .onChange(of: topDayID) { _, newTop in
                         if let newTop { store.ensureLoaded(around: newTop) }
@@ -106,5 +109,9 @@ struct CalendarTimelineView: View {
     private func jump(to month: Date) {
         store.ensureLoaded(around: month)
         topDayID = month
+    }
+
+    private func extendBy(months: Int, from date: Date) -> Date {
+        Calendar.current.date(byAdding: .month, value: months, to: date) ?? date
     }
 }

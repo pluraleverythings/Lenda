@@ -30,8 +30,8 @@ final class CalendarStore: ObservableObject {
     /// Hard bounds on how far the loaded range may extend from `today`. A safety net so a
     /// stray expansion can never run the range off to absurd dates and build tens of
     /// thousands of day buckets (which wedges the main thread).
-    private let maxPastDays = 366 * 2
-    private let maxFutureDays = 366 * 2
+    private let maxPastDays = 366 * 10
+    private let maxFutureDays = 366 * 10
 
     init(source: CalendarSource = EventKitCalendarSource(),
          calendar: Calendar = .current,

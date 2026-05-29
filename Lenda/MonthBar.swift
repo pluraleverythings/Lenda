@@ -6,6 +6,10 @@ struct MonthBar: View {
     let months: [Date]
     let currentMonth: Date?
     let onSelect: (Date) -> Void
+    var onReachStart: ((Date) -> Void)? = nil
+    var onReachEnd: ((Date) -> Void)? = nil
+
+    @State private var seenMonths: Set<Date> = []
 
     private static let monthFmt: DateFormatter = {
         let f = DateFormatter()
@@ -35,6 +39,7 @@ struct MonthBar: View {
                         }
                         .buttonStyle(.plain)
                         .id(month)
+                        .onAppear { handleAppear(month) }
                     }
                 }
                 .padding(.horizontal, DR.horizontalPadding)
@@ -50,6 +55,18 @@ struct MonthBar: View {
                 proxy.scrollTo(m, anchor: .center)
             }
         }
+    }
+
+    /// Fire the edge callbacks when the first/last month of the loaded range scrolls
+    /// back into view, but never on its very first appearance — otherwise the initial
+    /// render would expand the range before the user has scrolled at all.
+    private func handleAppear(_ month: Date) {
+        guard seenMonths.contains(month) else {
+            seenMonths.insert(month)
+            return
+        }
+        if month == months.first { onReachStart?(month) }
+        if month == months.last { onReachEnd?(month) }
     }
 
     private func isCurrent(_ month: Date) -> Bool {

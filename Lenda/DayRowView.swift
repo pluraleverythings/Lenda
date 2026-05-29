@@ -304,26 +304,14 @@ struct DayRowView: View {
                 // Label sits to the LEFT of the event, so right-align the text
                 // (both each wrapped line and the text block) so it hugs the
                 // event's leading edge.
-                Text(item.event.title)
-                    .font(DR.TypeStyle.eventTitle)
-                    .foregroundStyle(DR.ink)
-                    .lineLimit(2)
-                    .truncationMode(.tail)
-                    .multilineTextAlignment(.trailing)
-                    .frame(width: w, height: blockHeight, alignment: .trailing)
+                externalLabel(for: item.event, width: w, height: blockHeight, alignment: .trailing)
             }
             EventBlock(event: item.event, showLabel: placement == .inside)
                 .frame(width: blockWidth, height: blockHeight)
             if case .right(let w) = placement {
                 // Label sits to the RIGHT of the event, so left-align the text
                 // so it hugs the event's trailing edge.
-                Text(item.event.title)
-                    .font(DR.TypeStyle.eventTitle)
-                    .foregroundStyle(DR.ink)
-                    .lineLimit(2)
-                    .truncationMode(.tail)
-                    .multilineTextAlignment(.leading)
-                    .frame(width: w, height: blockHeight, alignment: .leading)
+                externalLabel(for: item.event, width: w, height: blockHeight, alignment: .leading)
             }
         }
         .contentShape(Rectangle())
@@ -337,6 +325,31 @@ struct DayRowView: View {
         ) {
             eventPopoverContent(item.event)
         }
+    }
+
+    /// Two-line journal-style label for an event sitting outside its colored block.
+    /// `alignment` is the horizontal side the text snaps to (the side of the event).
+    private func externalLabel(
+        for event: DayEvent,
+        width: CGFloat,
+        height: CGFloat,
+        alignment: HorizontalAlignment
+    ) -> some View {
+        let textAlignment: TextAlignment = alignment == .leading ? .leading : .trailing
+        let frameAlignment: Alignment = alignment == .leading ? .topLeading : .topTrailing
+        return VStack(alignment: alignment, spacing: 0) {
+            Text(event.title)
+                .font(DR.TypeStyle.eventTitle)
+                .foregroundStyle(DR.ink)
+                .lineLimit(3)
+                .truncationMode(.tail)
+                .multilineTextAlignment(textAlignment)
+            Text("\(TimeAxis.hourLabel(event.startMinute))–\(TimeAxis.hourLabel(event.endMinute))")
+                .font(.system(size: 9))
+                .foregroundStyle(DR.inkSecondary)
+                .lineLimit(1)
+        }
+        .frame(width: width, height: height, alignment: frameAlignment)
     }
 
     private func eventPopoverContent(_ event: DayEvent) -> some View {
