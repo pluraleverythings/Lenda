@@ -41,6 +41,7 @@ struct DayRowView: View {
                     Text(Self.dayNumFmt.string(from: day.date))
                         .font(day.isToday ? DR.TypeStyle.dayNumberToday : DR.TypeStyle.dayNumber)
                         .foregroundStyle(day.isToday ? DR.accent : DR.ink)
+                        .frame(width: 30, alignment: .leading)
                     if !day.allDayEvents.isEmpty { allDayBadge }
                 }
             }
