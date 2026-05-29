@@ -6,6 +6,7 @@ struct DayRowView: View {
 
     @State private var selectedEvent: DayEvent?
     @State private var showingAllDayList = false
+    @State private var showingSummary = false
 
     private static let weekdayFmt: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "EEE"; return f
@@ -22,6 +23,9 @@ struct DayRowView: View {
                 .frame(width: layout.width, height: DR.dayRowHeight)
         }
         .padding(.horizontal, DR.horizontalPadding)
+        .sheet(isPresented: $showingSummary) {
+            DaySummarySheet(day: day)
+        }
     }
 
     // MARK: - Day label
@@ -38,10 +42,16 @@ struct DayRowView: View {
                     .font(DR.TypeStyle.weekday)
                     .foregroundStyle(day.isToday ? DR.accent : DR.inkSecondary)
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text(Self.dayNumFmt.string(from: day.date))
-                        .font(day.isToday ? DR.TypeStyle.dayNumberToday : DR.TypeStyle.dayNumber)
-                        .foregroundStyle(day.isToday ? DR.accent : DR.ink)
-                        .frame(width: 30, alignment: .leading)
+                    Button {
+                        showingSummary = true
+                    } label: {
+                        Text(Self.dayNumFmt.string(from: day.date))
+                            .font(day.isToday ? DR.TypeStyle.dayNumberToday : DR.TypeStyle.dayNumber)
+                            .foregroundStyle(day.isToday ? DR.accent : DR.ink)
+                            .frame(width: 30, alignment: .leading)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                     if !day.allDayEvents.isEmpty { allDayBadge }
                 }
             }
