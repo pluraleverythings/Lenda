@@ -69,21 +69,26 @@ struct CalendarTimelineView: View {
                             TimelineGridBackground(layout: layout, leftInset: leftInset)
                         }
                     }
-                    .scrollTargetBehavior(ThresholdViewSnap(rowHeight: DR.dayRowHeight + DR.hairline))
+                    .scrollTargetBehavior(ThresholdViewSnap(
+                        rowHeight: DR.dayRowHeight + DR.hairline,
+                        focusedRowOffset: focusedRowOffset(in: store.days),
+                        focusedRowHeight: DR.dayRowHeight * 3
+                            + DR.timeHeaderHeight + 6
+                            + DR.hairline
+                    ))
                     .contentMargins(.top, 0, for: .scrollContent)
                     .scrollPosition(id: $topDayID, anchor: .top)
                     .onChange(of: topDayID) { _, newTop in
                         if let newTop { store.ensureLoaded(around: newTop) }
-                        // Collapse the currently focused row immediately so every
-                        // LazyVStack row is the same compact height during scroll —
-                        // otherwise the focused row's 3x height confuses the snap
-                        // math. The new top day re-expands only after 250ms of
-                        // stillness via the debounced work item below.
-                        focusedDayID = nil
+                        // Keep the focused row expanded while the user is scrolling
+                        // — collapsing it mid-gesture would shrink the content height
+                        // and cause the scroll to jump. After 1s of stillness we
+                        // commit the new top day, which collapses the old focused
+                        // row and expands the new one in a single animation pass.
                         focusWorkItem?.cancel()
                         let item = DispatchWorkItem { focusedDayID = newTop }
                         focusWorkItem = item
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: item)
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: item)
                     }
                     .onAppear {
                         if !didAnchorOnToday {
@@ -115,14 +120,27 @@ struct CalendarTimelineView: View {
     private func extendBy(months: Int, from date: Date) -> Date {
         Calendar.current.date(byAdding: .month, value: months, to: date) ?? date
     }
+
+    /// y-offset of the currently focused row inside the LazyVStack, assuming every
+    /// other row is at its compact height. The snap behavior uses this so the 75%
+    /// threshold is applied against each row's actual height (the focused row is
+    /// 3x tall plus the hour bar).
+    private func focusedRowOffset(in days: [DayBucket]) -> CGFloat? {
+        guard let id = focusedDayID,
+              let idx = days.firstIndex(where: { $0.id == id })
+        else { return nil }
+        return CGFloat(idx) * (DR.dayRowHeight + DR.hairline)
+    }
 }
 
-/// Snaps to row boundaries with a configurable threshold: a swipe only advances to
-/// the next row once the projected scroll target has crossed `threshold` of the
-/// current row's height. With threshold 0.75 a small flick rubber-bands back to
-/// where the user started, and only a 3/4-of-a-row gesture commits to the next day.
+/// Snaps to row boundaries with a 75% threshold. A swipe only advances to the next
+/// row once the projected scroll target has crossed `threshold` of the current
+/// row's height; smaller flicks rubber-band back to the day still partially at the
+/// top. Accounts for the focused row being ~3x taller than the others when present.
 private struct ThresholdViewSnap: ScrollTargetBehavior {
     let rowHeight: CGFloat
+    let focusedRowOffset: CGFloat?
+    let focusedRowHeight: CGFloat
     var threshold: CGFloat = 0.75
 
     func updateTarget(_ target: inout ScrollTarget, context: ScrollTargetBehaviorContext) {
@@ -131,6 +149,24 @@ private struct ThresholdViewSnap: ScrollTargetBehavior {
             target.rect.origin.y = 0
             return
         }
+        if let focusedOffset = focusedRowOffset {
+            let focusedBottom = focusedOffset + focusedRowHeight
+            if y >= focusedOffset && y < focusedBottom {
+                let progress = (y - focusedOffset) / focusedRowHeight
+                target.rect.origin.y = progress >= threshold ? focusedBottom : focusedOffset
+                return
+            }
+            if y >= focusedBottom {
+                let yAdj = y - focusedBottom
+                let rowFloat = yAdj / rowHeight
+                let rowIndex = floor(rowFloat)
+                let progress = rowFloat - rowIndex
+                let finalIndex = progress >= threshold ? rowIndex + 1 : rowIndex
+                target.rect.origin.y = focusedBottom + finalIndex * rowHeight
+                return
+            }
+        }
+        // Before the focused row (or no row is focused): uniform compact heights.
         let rowFloat = y / rowHeight
         let rowIndex = floor(rowFloat)
         let progress = rowFloat - rowIndex
