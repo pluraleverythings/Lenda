@@ -69,7 +69,7 @@ struct CalendarTimelineView: View {
                             TimelineGridBackground(layout: layout, leftInset: leftInset)
                         }
                     }
-                    .scrollTargetBehavior(.viewAligned(limitBehavior: .always))
+                    .scrollTargetBehavior(ThresholdViewSnap(rowHeight: DR.dayRowHeight + DR.hairline))
                     .contentMargins(.top, 0, for: .scrollContent)
                     .scrollPosition(id: $topDayID, anchor: .top)
                     .onChange(of: topDayID) { _, newTop in
@@ -83,7 +83,7 @@ struct CalendarTimelineView: View {
                         focusWorkItem?.cancel()
                         let item = DispatchWorkItem { focusedDayID = newTop }
                         focusWorkItem = item
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: item)
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: item)
                     }
                     .onAppear {
                         if !didAnchorOnToday {
@@ -114,6 +114,28 @@ struct CalendarTimelineView: View {
 
     private func extendBy(months: Int, from date: Date) -> Date {
         Calendar.current.date(byAdding: .month, value: months, to: date) ?? date
+    }
+}
+
+/// Snaps to row boundaries with a configurable threshold: a swipe only advances to
+/// the next row once the projected scroll target has crossed `threshold` of the
+/// current row's height. With threshold 0.75 a small flick rubber-bands back to
+/// where the user started, and only a 3/4-of-a-row gesture commits to the next day.
+private struct ThresholdViewSnap: ScrollTargetBehavior {
+    let rowHeight: CGFloat
+    var threshold: CGFloat = 0.75
+
+    func updateTarget(_ target: inout ScrollTarget, context: ScrollTargetBehaviorContext) {
+        let y = target.rect.minY
+        guard y > 0 else {
+            target.rect.origin.y = 0
+            return
+        }
+        let rowFloat = y / rowHeight
+        let rowIndex = floor(rowFloat)
+        let progress = rowFloat - rowIndex
+        let finalIndex = progress >= threshold ? rowIndex + 1 : rowIndex
+        target.rect.origin.y = finalIndex * rowHeight
     }
 }
 

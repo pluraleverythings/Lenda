@@ -50,7 +50,9 @@ struct DayRowView: View {
         // Focused rows draw their own opaque surface so the global timeline grid
         // (drawn behind the LazyVStack) doesn't bleed through the cards or the hour bar.
         .background(isFocused ? DR.surface : Color.clear)
-        .animation(.easeOut(duration: 0.2), value: isFocused)
+        // Only animate the *expansion*. Collapse is instant so the moment a scroll
+        // starts there's no shrinking animation racing against the snap math.
+        .animation(isFocused ? .easeOut(duration: 0.2) : nil, value: isFocused)
         .sheet(isPresented: $showingSummary) {
             DaySummarySheet(day: day)
         }
