@@ -74,11 +74,12 @@ struct CalendarTimelineView: View {
                     .scrollPosition(id: $topDayID, anchor: .top)
                     .onChange(of: topDayID) { _, newTop in
                         if let newTop { store.ensureLoaded(around: newTop) }
-                        // Debounce the focus expansion: only after the user stops
-                        // scrolling for 250ms do we animate the new top day into the
-                        // expanded card view. During the scroll itself every row stays
-                        // compact, which keeps the LazyVStack geometry stable so snap
-                        // aligns cleanly to row boundaries.
+                        // Collapse the currently focused row immediately so every
+                        // LazyVStack row is the same compact height during scroll —
+                        // otherwise the focused row's 3x height confuses the snap
+                        // math. The new top day re-expands only after 250ms of
+                        // stillness via the debounced work item below.
+                        focusedDayID = nil
                         focusWorkItem?.cancel()
                         let item = DispatchWorkItem { focusedDayID = newTop }
                         focusWorkItem = item

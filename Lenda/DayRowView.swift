@@ -50,9 +50,15 @@ struct DayRowView: View {
         // Focused rows draw their own opaque surface so the global timeline grid
         // (drawn behind the LazyVStack) doesn't bleed through the cards or the hour bar.
         .background(isFocused ? DR.surface : Color.clear)
-        .animation(.snappy(duration: 0.25), value: isFocused)
+        .animation(.easeOut(duration: 0.2), value: isFocused)
         .sheet(isPresented: $showingSummary) {
             DaySummarySheet(day: day)
+        }
+        // One popover modifier per row instead of one per event — every tappable
+        // event/chip/card just sets `selectedEvent` and this single attachment
+        // presents the detail.
+        .popover(item: $selectedEvent) { event in
+            eventPopoverContent(event)
         }
     }
 
@@ -186,14 +192,6 @@ struct DayRowView: View {
         }
         .contentShape(Rectangle())
         .onTapGesture { selectedEvent = ev }
-        .popover(
-            isPresented: Binding(
-                get: { selectedEvent?.id == ev.id },
-                set: { presenting in if !presenting { selectedEvent = nil } }
-            )
-        ) {
-            eventPopoverContent(ev)
-        }
     }
 
     private func timeOfDayColumn(title: String, events: [DayEvent]) -> some View {
@@ -244,14 +242,6 @@ struct DayRowView: View {
         .clipShape(RoundedRectangle(cornerRadius: 5))
         .contentShape(Rectangle())
         .onTapGesture { selectedEvent = ev }
-        .popover(
-            isPresented: Binding(
-                get: { selectedEvent?.id == ev.id },
-                set: { presenting in if !presenting { selectedEvent = nil } }
-            )
-        ) {
-            eventPopoverContent(ev)
-        }
     }
 
     // MARK: - Track
@@ -317,14 +307,6 @@ struct DayRowView: View {
         .contentShape(Rectangle())
         .offset(x: hStackOffsetX, y: topY)
         .onTapGesture { selectedEvent = item.event }
-        .popover(
-            isPresented: Binding(
-                get: { selectedEvent?.id == item.event.id },
-                set: { presenting in if !presenting { selectedEvent = nil } }
-            )
-        ) {
-            eventPopoverContent(item.event)
-        }
     }
 
     /// Two-line journal-style label for an event sitting outside its colored block.
