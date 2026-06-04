@@ -1,0 +1,63 @@
+default_platform(:ios)
+
+# Build an App Store Connect API key value object from env vars. Used by both
+# `match` (to talk to the developer portal) and `upload_to_testflight` (to talk to
+# App Store Connect). The .p8 file content is expected to be base64-encoded in the
+# APP_STORE_CONNECT_API_KEY_CONTENT secret so it survives GitHub's secret store.
+def app_store_connect_key
+  app_store_connect_api_key(
+    key_id: ENV.fetch("APP_STORE_CONNECT_API_KEY_ID"),
+    issuer_id: ENV.fetch("APP_STORE_CONNECT_API_KEY_ISSUER_ID"),
+    key_content: ENV.fetch("APP_STORE_CONNECT_API_KEY_CONTENT"),
+    is_key_content_base64: true,
+    in_house: false
+  )
+end
+
+platform :ios do
+  before_all do
+    setup_ci if ENV["CI"]
+  end
+
+  desc "One-time bootstrap: create the distribution cert + appstore profile and " \
+       "push encrypted copies to the match repo. Run via workflow_dispatch the first time."
+  lane :bootstrap do
+    match(
+      type: "appstore",
+      readonly: false,
+      api_key: app_store_connect_key
+    )
+  end
+
+  desc "Build the app and upload to TestFlight."
+  lane :beta do
+    api_key = app_store_connect_key
+
+    match(
+      type: "appstore",
+      readonly: true,
+      api_key: api_key
+    )
+
+    # TestFlight requires monotonically increasing build numbers. The CI workflow
+    # sets BUILD_NUMBER to a Unix timestamp so it always increases.
+    build_number = ENV["BUILD_NUMBER"] || Time.now.to_i.to_s
+
+    build_app(
+      project: "Lenda.xcodeproj",
+      scheme: "Lenda",
+      configuration: "Release",
+      export_method: "app-store",
+      output_directory: "build",
+      output_name: "Lenda.ipa",
+      xcargs: "CURRENT_PROJECT_VERSION=#{build_number} CODE_SIGN_STYLE=Manual",
+      clean: true
+    )
+
+    upload_to_testflight(
+      api_key: api_key,
+      ipa: "build/Lenda.ipa",
+      skip_waiting_for_build_processing: true
+    )
+  end
+end

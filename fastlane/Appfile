@@ -1,0 +1,4 @@
+# fastlane reads this for the app's bundle identifier. If you change the bundle ID
+# in the Xcode project (Signing & Capabilities → Bundle Identifier), change it here
+# too — or set the APP_IDENTIFIER env var / GitHub repo variable to override.
+app_identifier ENV.fetch("APP_IDENTIFIER", "com.lenda.Lenda")

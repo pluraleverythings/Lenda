@@ -1,0 +1,8 @@
+# Encrypted signing artifacts (distribution cert + provisioning profile) live in
+# the private git repo pointed to by MATCH_GIT_URL. First run with `readonly: false`
+# (the `bootstrap` lane) creates them in Apple's portal AND pushes encrypted copies
+# to the match repo. Every subsequent run just reads from it.
+git_url ENV.fetch("MATCH_GIT_URL", "")
+storage_mode "git"
+type "appstore"
+app_identifier ENV.fetch("APP_IDENTIFIER", "com.lenda.Lenda")
