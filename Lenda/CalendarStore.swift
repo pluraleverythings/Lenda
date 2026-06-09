@@ -16,6 +16,9 @@ final class CalendarStore: ObservableObject {
     @Published private(set) var days: [DayBucket] = []
     @Published private(set) var timeAxis: TimeAxis = TimeAxis.build(from: [])
     @Published var lastError: String?
+    /// Bumped whenever something asks the timeline to scroll back to today (e.g.,
+    /// the Today toolbar button). The view watches this with onChange.
+    @Published var jumpToTodayTrigger: UUID = UUID()
 
     let today: Date
     private(set) var rangeStart: Date
@@ -104,18 +107,28 @@ final class CalendarStore: ObservableObject {
         return days.first(where: { $0.id == startOfDay })
     }
 
-    /// First-day-of-month dates spanning the loaded range, in order. Drives the month bar.
+    /// First-day-of-month dates spanning the bar's full reachable window — not just
+    /// what's currently event-loaded. The bar is virtually scrollable across the
+    /// whole ±10 years; tapping a month triggers `ensureLoaded` for its days.
     var monthsInRange: [Date] {
-        guard !days.isEmpty else { return [] }
+        let pastMonths = 12 * 10
+        let futureMonths = 12 * 10
+        let start = calendar.date(byAdding: .month, value: -pastMonths, to: today) ?? today
+        let end = calendar.date(byAdding: .month, value: futureMonths + 1, to: today) ?? today
         var months: [Date] = []
-        var cursor = calendar.dateInterval(of: .month, for: rangeStart)?.start ?? rangeStart
-        let endMonth = calendar.dateInterval(of: .month, for: rangeEnd)?.start ?? rangeEnd
+        var cursor = calendar.dateInterval(of: .month, for: start)?.start ?? start
+        let endMonth = calendar.dateInterval(of: .month, for: end)?.start ?? end
         while cursor < endMonth {
             months.append(cursor)
             guard let next = calendar.date(byAdding: .month, value: 1, to: cursor) else { break }
             cursor = next
         }
         return months
+    }
+
+    /// Signal the view to scroll back to today.
+    func jumpToToday() {
+        jumpToTodayTrigger = UUID()
     }
 
     // MARK: - Loading

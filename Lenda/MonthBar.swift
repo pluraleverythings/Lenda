@@ -1,15 +1,13 @@
 import SwiftUI
 
 /// Horizontal strip of month labels. Tap a month → jump there. The currently-visible
-/// month auto-scrolls into view as the user scrolls the timeline.
+/// month auto-scrolls into view as the user scrolls the timeline. Built on a
+/// `LazyHStack` so the bar's full ±10-year range (~240 months) only realises the
+/// months actually near the visible window.
 struct MonthBar: View {
     let months: [Date]
     let currentMonth: Date?
     let onSelect: (Date) -> Void
-    var onReachStart: ((Date) -> Void)? = nil
-    var onReachEnd: ((Date) -> Void)? = nil
-
-    @State private var seenMonths: Set<Date> = []
 
     private static let monthFmt: DateFormatter = {
         let f = DateFormatter()
@@ -25,7 +23,7 @@ struct MonthBar: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 20) {
+                LazyHStack(spacing: 20) {
                     ForEach(months, id: \.self) { month in
                         let active = isCurrent(month)
                         Button {
@@ -39,7 +37,6 @@ struct MonthBar: View {
                         }
                         .buttonStyle(.plain)
                         .id(month)
-                        .onAppear { handleAppear(month) }
                     }
                 }
                 .padding(.horizontal, DR.horizontalPadding)
@@ -57,18 +54,6 @@ struct MonthBar: View {
         }
     }
 
-    /// Fire the edge callbacks when the first/last month of the loaded range scrolls
-    /// back into view, but never on its very first appearance — otherwise the initial
-    /// render would expand the range before the user has scrolled at all.
-    private func handleAppear(_ month: Date) {
-        guard seenMonths.contains(month) else {
-            seenMonths.insert(month)
-            return
-        }
-        if month == months.first { onReachStart?(month) }
-        if month == months.last { onReachEnd?(month) }
-    }
-
     private func isCurrent(_ month: Date) -> Bool {
         guard let current = currentMonth else { return false }
         return Calendar.current.isDate(month, equalTo: current, toGranularity: .month)
@@ -78,8 +63,7 @@ struct MonthBar: View {
         let cal = Calendar.current
         let monthNum = cal.component(.month, from: month)
         let isJanuary = monthNum == 1
-        let isFirst = months.first.map { cal.isDate($0, equalTo: month, toGranularity: .month) } ?? false
-        let fmt = (isJanuary || isFirst) ? Self.monthYearFmt : Self.monthFmt
+        let fmt = isJanuary ? Self.monthYearFmt : Self.monthFmt
         return fmt.string(from: month).uppercased()
     }
 }
