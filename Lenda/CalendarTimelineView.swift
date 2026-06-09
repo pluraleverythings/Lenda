@@ -94,12 +94,18 @@ struct CalendarTimelineView: View {
                             withAnimation(.easeInOut(duration: 0.25)) {
                                 scroller.scrollTo(target, anchor: .top)
                             }
-                            pendingJump = nil
+                            // Defer the nil reset to the next runloop so we don't
+                            // write to pendingJump inside its own onChange — SwiftUI
+                            // would otherwise log "tried to update multiple times
+                            // per frame".
+                            DispatchQueue.main.async { pendingJump = nil }
                         }
                     }
                     .onChange(of: store.jumpToTodayTrigger) { _, _ in
-                        store.ensureLoaded(around: store.today)
-                        pendingJump = store.today
+                        DispatchQueue.main.async {
+                            store.ensureLoaded(around: store.today)
+                            pendingJump = store.today
+                        }
                     }
                 }
             }
