@@ -66,22 +66,18 @@ struct CalendarTimelineView: View {
                             TimelineGridBackground(layout: layout, leftInset: leftInset)
                         }
                     }
-                    .scrollTargetBehavior(ThresholdViewSnap(
-                        rowHeight: DR.dayRowHeight + DR.hairline,
-                        focusedRowOffset: focusedRowOffset(in: store.days),
-                        focusedRowHeight: Self.focusedRowTotalHeight
-                    ))
+                    .scrollTargetBehavior(.viewAligned)
                     .contentMargins(.top, 0, for: .scrollContent)
                     .scrollPosition(id: $topDayID, anchor: .top)
                     .onChange(of: topDayID) { _, newTop in
                         if let newTop { store.ensureLoaded(around: newTop) }
-                        // Keep the focused row expanded during the scroll itself;
-                        // commit the new focus after 1s of stillness so the height
-                        // change happens once, not on every gesture.
+                        // Commit the focus almost immediately — just one beat after
+                        // the last topDayID change so a wheel-style flick across many
+                        // days doesn't expand/collapse every row it passes through.
                         focusWorkItem?.cancel()
                         let item = DispatchWorkItem { focusedDayID = newTop }
                         focusWorkItem = item
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: item)
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: item)
                     }
                     .onAppear {
                         if !didAnchorOnToday {
@@ -111,64 +107,10 @@ struct CalendarTimelineView: View {
         .background(DR.surface.ignoresSafeArea())
     }
 
-    /// Total height a focused row occupies in the LazyVStack: the 3x day-row content,
-    /// the embedded hours bar (header + its 4pt top / 2pt bottom padding), and the
-    /// trailing separator hairline.
-    private static let focusedRowTotalHeight: CGFloat =
-        DR.dayRowHeight * 3 + DR.timeHeaderHeight + 6 + DR.hairline
-
     private var currentMonth: Date? {
         let cal = Calendar.current
         let day = topDayID ?? store.today
         return cal.dateInterval(of: .month, for: day)?.start
-    }
-
-    private func focusedRowOffset(in days: [DayBucket]) -> CGFloat? {
-        guard let id = focusedDayID,
-              let idx = days.firstIndex(where: { $0.id == id })
-        else { return nil }
-        return CGFloat(idx) * (DR.dayRowHeight + DR.hairline)
-    }
-}
-
-/// Snaps to row boundaries with a 75% threshold. A swipe only advances to the next
-/// row once the projected scroll target has crossed `threshold` of the current
-/// row's height; smaller flicks rubber-band back to the day still partially at the
-/// top. Accounts for the focused row being ~3x taller than the others when present.
-private struct ThresholdViewSnap: ScrollTargetBehavior {
-    let rowHeight: CGFloat
-    let focusedRowOffset: CGFloat?
-    let focusedRowHeight: CGFloat
-    var threshold: CGFloat = 0.75
-
-    func updateTarget(_ target: inout ScrollTarget, context: ScrollTargetBehaviorContext) {
-        let y = target.rect.minY
-        guard y > 0 else {
-            target.rect.origin.y = 0
-            return
-        }
-        if let focusedOffset = focusedRowOffset {
-            let focusedBottom = focusedOffset + focusedRowHeight
-            if y >= focusedOffset && y < focusedBottom {
-                let progress = (y - focusedOffset) / focusedRowHeight
-                target.rect.origin.y = progress >= threshold ? focusedBottom : focusedOffset
-                return
-            }
-            if y >= focusedBottom {
-                let yAdj = y - focusedBottom
-                let rowFloat = yAdj / rowHeight
-                let rowIndex = floor(rowFloat)
-                let progress = rowFloat - rowIndex
-                let finalIndex = progress >= threshold ? rowIndex + 1 : rowIndex
-                target.rect.origin.y = focusedBottom + finalIndex * rowHeight
-                return
-            }
-        }
-        let rowFloat = y / rowHeight
-        let rowIndex = floor(rowFloat)
-        let progress = rowFloat - rowIndex
-        let finalIndex = progress >= threshold ? rowIndex + 1 : rowIndex
-        target.rect.origin.y = finalIndex * rowHeight
     }
 }
 
