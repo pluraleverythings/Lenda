@@ -70,10 +70,14 @@ struct CalendarTimelineView: View {
                     .contentMargins(.top, 0, for: .scrollContent)
                     .scrollPosition(id: $topDayID, anchor: .top)
                     .onChange(of: topDayID) { _, newTop in
-                        if let newTop { store.ensureLoaded(around: newTop) }
-                        // Commit the focus almost immediately — just one beat after
-                        // the last topDayID change so a wheel-style flick across many
-                        // days doesn't expand/collapse every row it passes through.
+                        // Defer the store mutation so its cascade (days change →
+                        // layout change → .scrollPosition re-anchor → topDayID
+                        // change) doesn't land inside this same onChange's frame.
+                        if let newTop {
+                            DispatchQueue.main.async {
+                                store.ensureLoaded(around: newTop)
+                            }
+                        }
                         focusWorkItem?.cancel()
                         let item = DispatchWorkItem { focusedDayID = newTop }
                         focusWorkItem = item
