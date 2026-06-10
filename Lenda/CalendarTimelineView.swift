@@ -10,9 +10,6 @@ struct CalendarTimelineView: View {
     @State private var focusedDayID: Date?
     @State private var didAnchorOnToday = false
     @State private var pendingJump: Date?
-    /// Debounce timer for promoting `topDayID` to `focusedDayID` after the scroll
-    /// settles. Cancellable so fast scrolls don't pile up pending closures.
-    @State private var focusWorkItem: DispatchWorkItem?
 
     var body: some View {
         switch store.access {
@@ -56,7 +53,12 @@ struct CalendarTimelineView: View {
                                 DayRowView(
                                     day: day,
                                     layout: layout,
-                                    isFocused: day.id == focusedDayID
+                                    isFocused: day.id == focusedDayID,
+                                    onToggleFocus: {
+                                        withAnimation(.easeOut(duration: 0.2)) {
+                                            focusedDayID = focusedDayID == day.id ? nil : day.id
+                                        }
+                                    }
                                 )
                                 .id(day.id)
                             }
@@ -70,6 +72,8 @@ struct CalendarTimelineView: View {
                     .contentMargins(.top, 0, for: .scrollContent)
                     .scrollPosition(id: $topDayID, anchor: .top)
                     .onChange(of: topDayID) { _, newTop in
+                        // Expansion is tap-driven only — scrolling never changes row
+                        // heights, so the scroll geometry stays stable end to end.
                         // Defer the store mutation so its cascade (days change →
                         // layout change → .scrollPosition re-anchor → topDayID
                         // change) doesn't land inside this same onChange's frame.
@@ -78,14 +82,6 @@ struct CalendarTimelineView: View {
                                 store.ensureLoaded(around: newTop)
                             }
                         }
-                        focusWorkItem?.cancel()
-                        let item = DispatchWorkItem { focusedDayID = newTop }
-                        focusWorkItem = item
-                        // 200ms is a compromise: still feels near-immediate when the
-                        // wheel lands, but long enough that a brief direction-reverse
-                        // doesn't commit a focus mid-flick and shift the layout under
-                        // the user's finger.
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: item)
                     }
                     .onAppear {
                         if !didAnchorOnToday {

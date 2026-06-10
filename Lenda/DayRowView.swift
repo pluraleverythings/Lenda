@@ -4,6 +4,10 @@ struct DayRowView: View {
     let day: DayBucket
     let layout: AxisLayout
     var isFocused: Bool = false
+    /// Called when the user taps the row's empty area — expands a compact row or
+    /// collapses the expanded one. Event blocks/cards keep their own tap targets
+    /// (child gestures win), so this only fires on background taps.
+    var onToggleFocus: () -> Void = {}
 
     @State private var selectedEvent: DayEvent?
     @State private var showingAllDayList = false
@@ -33,6 +37,8 @@ struct DayRowView: View {
                     }
                 }
                 .frame(width: layout.width, height: rowHeight, alignment: .topLeading)
+                .contentShape(Rectangle())
+                .onTapGesture { onToggleFocus() }
             }
             .padding(.horizontal, DR.horizontalPadding)
             if isFocused {
