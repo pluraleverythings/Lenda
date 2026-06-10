@@ -49,6 +49,10 @@ struct DayRowView: View {
         }
         // Focused rows draw their own opaque surface so the global timeline grid
         // (drawn behind the LazyVStack) doesn't bleed through the cards or the hour bar.
+        // Today gets a subtle accent wash so it stands out from the rest even when
+        // it isn't the focused row. Focused rows draw their own opaque surface on
+        // top so the global timeline grid doesn't bleed through the cards.
+        .background(day.isToday ? DR.accent.opacity(0.07) : Color.clear)
         .background(isFocused ? DR.surface : Color.clear)
         // Old row collapses while the new one expands in the same animation pass —
         // net content height is unchanged so the scroll position doesn't jump.

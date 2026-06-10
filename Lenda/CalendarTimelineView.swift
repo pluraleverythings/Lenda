@@ -81,7 +81,11 @@ struct CalendarTimelineView: View {
                         focusWorkItem?.cancel()
                         let item = DispatchWorkItem { focusedDayID = newTop }
                         focusWorkItem = item
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: item)
+                        // 200ms is a compromise: still feels near-immediate when the
+                        // wheel lands, but long enough that a brief direction-reverse
+                        // doesn't commit a focus mid-flick and shift the layout under
+                        // the user's finger.
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: item)
                     }
                     .onAppear {
                         if !didAnchorOnToday {
