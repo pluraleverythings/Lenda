@@ -9,6 +9,8 @@ final class CalendarStoreTests: XCTestCase {
 
     private func makeStore(
         source: FakeCalendarSource = FakeCalendarSource(),
+        windowPast: Int = 40,
+        windowFuture: Int = 40,
         initialPast: Int = 3,
         initialFuture: Int = 4,
         expansionPad: Int = 2
@@ -17,9 +19,12 @@ final class CalendarStoreTests: XCTestCase {
             source: source,
             calendar: TestDate.calendar,
             today: TestDate.referenceToday,
+            windowPastDays: windowPast,
+            windowFutureDays: windowFuture,
             initialPastDays: initialPast,
             initialFutureDays: initialFuture,
-            expansionPadDays: expansionPad
+            expansionPadDays: expansionPad,
+            axisPadDays: 40
         )
     }
 
@@ -38,10 +43,22 @@ final class CalendarStoreTests: XCTestCase {
         let store = makeStore(source: source)
         await store.requestAccessAndLoad()
         XCTAssertEqual(store.access, .granted)
-        XCTAssertEqual(store.days.count, 3 + 4)
+        // `days` is the full fixed window — its length never changes after grant,
+        // which is the layout-stability contract the scroll view relies on.
+        XCTAssertEqual(store.days.count, 40 + 40)
         let today = store.days.first(where: { $0.isToday })
         XCTAssertNotNil(today)
         XCTAssertEqual(today?.timedEvents.count, 1)
+    }
+
+    func test_ensureLoaded_neverChangesDayCount() async {
+        let store = makeStore()
+        await store.requestAccessAndLoad()
+        let countBefore = store.days.count
+        store.ensureLoaded(around: TestDate.date(day: 25))
+        store.ensureLoaded(around: TestDate.date(month: 2, day: 1))
+        XCTAssertEqual(store.days.count, countBefore,
+                       "event loading must never grow or shrink the day array")
     }
 
     func test_deniedAccess_setsDeniedAndLeavesDaysEmpty() async {
@@ -179,7 +196,7 @@ final class CalendarStoreTests: XCTestCase {
     // MARK: - Month bar driver
 
     func test_monthsInRange_coversAllLoadedDays() async {
-        let store = makeStore(initialPast: 35, initialFuture: 35)
+        let store = makeStore()
         await store.requestAccessAndLoad()
         let months = store.monthsInRange
         XCTAssertGreaterThanOrEqual(months.count, 3, "loaded range should span at least 3 months")

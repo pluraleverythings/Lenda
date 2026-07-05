@@ -25,17 +25,29 @@ final class EventKitCalendarSource: CalendarSource {
         let calendars = store.calendars(for: .event)
         guard !calendars.isEmpty else { return [] }
 
-        let predicate = store.predicateForEvents(withStart: start, end: end, calendars: calendars)
-        return store.events(matching: predicate).map { ek in
-            SourceEvent(
-                id: ek.eventIdentifier ?? UUID().uuidString,
-                title: ek.title ?? "(No title)",
-                start: ek.startDate,
-                end: ek.endDate,
-                isAllDay: ek.isAllDay,
-                location: ek.location,
-                cgColor: ek.calendar?.cgColor
-            )
+        // EventKit predicates silently truncate spans longer than 4 years —
+        // events past the cap just vanish from results. Query in ≤3-year chunks
+        // and concatenate. Callers dedup, so an event straddling a chunk edge
+        // appearing twice is harmless.
+        let chunkSeconds: TimeInterval = 60 * 60 * 24 * 365 * 3
+        var result: [SourceEvent] = []
+        var cursor = start
+        while cursor < end {
+            let chunkEnd = min(end, cursor.addingTimeInterval(chunkSeconds))
+            let predicate = store.predicateForEvents(withStart: cursor, end: chunkEnd, calendars: calendars)
+            result += store.events(matching: predicate).map { ek in
+                SourceEvent(
+                    id: ek.eventIdentifier ?? UUID().uuidString,
+                    title: ek.title ?? "(No title)",
+                    start: ek.startDate,
+                    end: ek.endDate,
+                    isAllDay: ek.isAllDay,
+                    location: ek.location,
+                    cgColor: ek.calendar?.cgColor
+                )
+            }
+            cursor = chunkEnd
         }
+        return result
     }
 }

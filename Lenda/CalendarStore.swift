@@ -1,9 +1,13 @@
 import Foundation
 import SwiftUI
 
-/// View-facing calendar state. Talks to any `CalendarSource`. Holds a contiguous range
-/// of `DayBucket`s; the range expands outward as the user scrolls past its edges or
-/// jumps to a month outside it.
+/// View-facing calendar state. Talks to any `CalendarSource`.
+///
+/// Layout stability contract: `days` is built ONCE per grant as a fixed-length window
+/// around today and never changes length afterwards. Scrolling loads *events* into
+/// existing buckets (constant row heights, stable scroll geometry) instead of growing
+/// the array — appending/prepending rows mid-gesture is what used to make the scroll
+/// jump.
 @MainActor
 final class CalendarStore: ObservableObject {
     enum AccessState: Equatable {
@@ -21,38 +25,52 @@ final class CalendarStore: ObservableObject {
     @Published var jumpToTodayTrigger: UUID = UUID()
 
     let today: Date
+    /// Fixed day window covered by `days`. Set at init, never mutated.
+    private(set) var windowStart: Date
+    private(set) var windowEnd: Date       // exclusive
+
+    /// Contiguous sub-range of the window whose *events* have been fetched.
     private(set) var rangeStart: Date
-    private(set) var rangeEnd: Date    // exclusive
+    private(set) var rangeEnd: Date        // exclusive
 
     private let source: CalendarSource
     private let calendar: Calendar
-    private let initialPastDays: Int
-    private let initialFutureDays: Int
     private let expansionPadDays: Int
+    private let axisPadDays: Int
 
-    /// Hard bounds on how far the loaded range may extend from `today`. A safety net so a
-    /// stray expansion can never run the range off to absurd dates and build tens of
-    /// thousands of day buckets (which wedges the main thread).
-    private let maxPastDays = 366 * 10
-    private let maxFutureDays = 366 * 10
+    /// Every event fetched so far. Keyed by id + start time so occurrences of a
+    /// recurring event (which share an identifier) don't collapse into one.
+    private var loadedEvents: [String: SourceEvent] = [:]
 
     init(source: CalendarSource = EventKitCalendarSource(),
          calendar: Calendar = .current,
          today: Date = Date(),
-         initialPastDays: Int = 30,
-         initialFutureDays: Int = 60,
-         expansionPadDays: Int = 30) {
+         windowPastDays: Int = 366 * 3,
+         windowFutureDays: Int = 366 * 3,
+         initialPastDays: Int = 60,
+         initialFutureDays: Int = 90,
+         expansionPadDays: Int = 60,
+         axisPadDays: Int = 90) {
         self.source = source
         self.calendar = calendar
         let startOfToday = calendar.startOfDay(for: today)
         self.today = startOfToday
-        self.initialPastDays = initialPastDays
-        self.initialFutureDays = initialFutureDays
         self.expansionPadDays = expansionPadDays
-        self.rangeStart = calendar.date(byAdding: .day, value: -initialPastDays, to: startOfToday)
+        self.axisPadDays = axisPadDays
+        let wStart = calendar.date(byAdding: .day, value: -windowPastDays, to: startOfToday)
             ?? startOfToday
-        self.rangeEnd = calendar.date(byAdding: .day, value: initialFutureDays, to: startOfToday)
+        let wEnd = calendar.date(byAdding: .day, value: windowFutureDays, to: startOfToday)
             ?? startOfToday
+        self.windowStart = wStart
+        self.windowEnd = wEnd
+        self.rangeStart = max(
+            wStart,
+            calendar.date(byAdding: .day, value: -initialPastDays, to: startOfToday) ?? startOfToday
+        )
+        self.rangeEnd = min(
+            wEnd,
+            calendar.date(byAdding: .day, value: initialFutureDays, to: startOfToday) ?? startOfToday
+        )
     }
 
     // MARK: - Lifecycle
@@ -61,7 +79,7 @@ final class CalendarStore: ObservableObject {
         do {
             let granted = try await source.requestAccess()
             self.access = granted ? .granted : .denied
-            if granted { reload() }
+            if granted { initialLoad() }
         } catch {
             self.access = .denied
             self.lastError = error.localizedDescription
@@ -71,53 +89,138 @@ final class CalendarStore: ObservableObject {
     /// For tests and a manual refresh control. Skips the access prompt; assumes granted.
     func loadAssumingAccess() {
         self.access = .granted
-        reload()
+        initialLoad()
     }
 
+    /// Re-fetch events for the already-loaded range. Keeps `days` length unchanged.
     func reload() {
-        guard access == .granted else { return }
-        load(from: rangeStart, to: rangeEnd)
+        guard access == .granted, !days.isEmpty else { return }
+        loadedEvents.removeAll()
+        fetchAndMerge(from: rangeStart, to: rangeEnd)
+        rebuildBuckets(from: rangeStart, to: rangeEnd)
+        rebuildAxis()
     }
 
-    // MARK: - Range expansion
+    private func initialLoad() {
+        buildSkeleton()
+        fetchAndMerge(from: rangeStart, to: rangeEnd)
+        rebuildBuckets(from: rangeStart, to: rangeEnd)
+        rebuildAxis()
+    }
 
-    /// Ensure the loaded range covers `date` and a padding window on either side. No-op
-    /// if the date is already comfortably inside the range.
+    /// Build the fixed-length day array once. Buckets start with no events; event
+    /// loading fills them in without ever changing the array's length.
+    private func buildSkeleton() {
+        var buckets: [DayBucket] = []
+        var cursor = windowStart
+        while cursor < windowEnd {
+            let next = calendar.date(byAdding: .day, value: 1, to: cursor)
+                ?? cursor.addingTimeInterval(86_400)
+            buckets.append(DayBucket(id: cursor, date: cursor, events: [], isToday: cursor == today))
+            cursor = next
+        }
+        self.days = buckets
+    }
+
+    // MARK: - Incremental event loading
+
+    /// Make sure events around `date` are loaded. Fetches only the missing slice of
+    /// the range (with hysteresis so scrolling doesn't fire a query per row) and
+    /// rebuilds only the affected buckets. Never changes `days.count` and never
+    /// touches the axis — scroll geometry stays stable.
     func ensureLoaded(around date: Date) {
-        guard access == .granted else { return }
+        guard access == .granted, !days.isEmpty else { return }
         let target = calendar.startOfDay(for: date)
-        let rawStart = calendar.date(byAdding: .day, value: -expansionPadDays, to: target) ?? target
-        let rawEnd = calendar.date(byAdding: .day, value: expansionPadDays + 1, to: target) ?? target
+        let wantStart = max(windowStart, dayOffset(target, -expansionPadDays))
+        let wantEnd = min(windowEnd, dayOffset(target, expansionPadDays + 1))
 
-        let floor = calendar.date(byAdding: .day, value: -maxPastDays, to: today) ?? today
-        let ceiling = calendar.date(byAdding: .day, value: maxFutureDays, to: today) ?? today
-        let wantStart = max(rawStart, floor)
-        let wantEnd = min(rawEnd, ceiling)
+        if wantStart < rangeStart {
+            // Overshoot by another pad so the next backward trigger is ~pad days away.
+            let fetchStart = max(windowStart, dayOffset(target, -expansionPadDays * 2))
+            fetchAndMerge(from: fetchStart, to: rangeStart)
+            let oldStart = rangeStart
+            rangeStart = fetchStart
+            rebuildBuckets(from: fetchStart, to: oldStart)
+        }
+        if wantEnd > rangeEnd {
+            let fetchEnd = min(windowEnd, dayOffset(target, expansionPadDays * 2 + 1))
+            fetchAndMerge(from: rangeEnd, to: fetchEnd)
+            let oldEnd = rangeEnd
+            rangeEnd = fetchEnd
+            rebuildBuckets(from: oldEnd, to: fetchEnd)
+        }
+    }
 
-        var changed = false
-        if wantStart < rangeStart { rangeStart = wantStart; changed = true }
-        if wantEnd > rangeEnd { rangeEnd = wantEnd; changed = true }
-        if changed { reload() }
+    private func fetchAndMerge(from start: Date, to end: Date) {
+        guard start < end else { return }
+        for event in source.events(from: start, to: end) {
+            loadedEvents["\(event.id)#\(event.start.timeIntervalSince1970)"] = event
+        }
+    }
+
+    /// Re-project loaded events into the buckets covering [start, end).
+    private func rebuildBuckets(from start: Date, to end: Date) {
+        guard let firstIdx = dayIndex(for: start) else { return }
+        let relevant = loadedEvents.values.filter { $0.start < end && $0.end > start }
+        var idx = firstIdx
+        var cursor = start
+        while cursor < end, idx < days.count {
+            let next = calendar.date(byAdding: .day, value: 1, to: cursor)
+                ?? cursor.addingTimeInterval(86_400)
+            let projected = relevant.compactMap { DayEvent.project($0, into: cursor, dayEnd: next) }
+            days[idx] = DayBucket(id: cursor, date: cursor, events: projected, isToday: cursor == today)
+            cursor = next
+            idx += 1
+        }
+    }
+
+    // MARK: - Axis (stable per load, never rebuilt by scrolling)
+
+    /// Hour-density axis derived from a FIXED window around today (±axisPadDays),
+    /// not from everything ever loaded — so gridline positions don't shift as the
+    /// user scrolls and more events stream in.
+    private func rebuildAxis() {
+        let axisStart = max(windowStart, dayOffset(today, -axisPadDays))
+        let axisEnd = min(windowEnd, dayOffset(today, axisPadDays))
+        var counts = Array(repeating: 0, count: 24)
+        if let startIdx = dayIndex(for: axisStart), let endIdx = dayIndex(for: axisEnd) {
+            for i in startIdx...max(startIdx, min(endIdx, days.count - 1)) {
+                for event in days[i].timedEvents {
+                    let s = max(0, min(1440, event.startMinute))
+                    let e = max(s + 1, min(1440, event.endMinute))
+                    for h in min(23, s / 60)...min(23, (e - 1) / 60) { counts[h] += 1 }
+                }
+            }
+        }
+        // An empty calendar gets a business-hours bias so the axis is still meaningful.
+        if !counts.contains(where: { $0 > 0 }) {
+            for h in 7..<22 { counts[h] = 1 }
+        }
+        self.timeAxis = TimeAxis.build(from: counts)
     }
 
     // MARK: - Lookups for the view layer
 
-    func dayBucket(for date: Date) -> DayBucket? {
-        let startOfDay = calendar.startOfDay(for: date)
-        return days.first(where: { $0.id == startOfDay })
+    /// O(1) index of the bucket containing `date`, or nil outside the window.
+    func dayIndex(for date: Date) -> Int? {
+        let day = calendar.startOfDay(for: date)
+        guard let offset = calendar.dateComponents([.day], from: windowStart, to: day).day,
+              offset >= 0, offset < days.count
+        else { return nil }
+        return offset
     }
 
-    /// First-day-of-month dates spanning the bar's full reachable window — not just
-    /// what's currently event-loaded. The bar is virtually scrollable across the
-    /// whole ±10 years; tapping a month triggers `ensureLoaded` for its days.
+    func dayBucket(for date: Date) -> DayBucket? {
+        dayIndex(for: date).map { days[$0] }
+    }
+
+    /// First-day-of-month dates spanning the fixed window. Drives the month bar —
+    /// every month in the bar is reachable because `days` covers the same window.
     var monthsInRange: [Date] {
-        let pastMonths = 12 * 10
-        let futureMonths = 12 * 10
-        let start = calendar.date(byAdding: .month, value: -pastMonths, to: today) ?? today
-        let end = calendar.date(byAdding: .month, value: futureMonths + 1, to: today) ?? today
+        guard !days.isEmpty else { return [] }
         var months: [Date] = []
-        var cursor = calendar.dateInterval(of: .month, for: start)?.start ?? start
-        let endMonth = calendar.dateInterval(of: .month, for: end)?.start ?? end
+        var cursor = calendar.dateInterval(of: .month, for: windowStart)?.start ?? windowStart
+        let endMonth = calendar.dateInterval(of: .month, for: windowEnd)?.start ?? windowEnd
         while cursor < endMonth {
             months.append(cursor)
             guard let next = calendar.date(byAdding: .month, value: 1, to: cursor) else { break }
@@ -131,43 +234,7 @@ final class CalendarStore: ObservableObject {
         jumpToTodayTrigger = UUID()
     }
 
-    // MARK: - Loading
-
-    private func load(from start: Date, to end: Date) {
-        let raw = source.events(from: start, to: end)
-        var buckets: [DayBucket] = []
-        var cursor = start
-        while cursor < end {
-            let next = calendar.date(byAdding: .day, value: 1, to: cursor)
-                ?? cursor.addingTimeInterval(86_400)
-            let projected = raw.compactMap { DayEvent.project($0, into: cursor, dayEnd: next) }
-            buckets.append(DayBucket(
-                id: cursor,
-                date: cursor,
-                events: projected,
-                isToday: cursor == today
-            ))
-            cursor = next
-        }
-        self.days = buckets
-        self.timeAxis = buildAxis(from: buckets)
-    }
-
-    private func buildAxis(from buckets: [DayBucket]) -> TimeAxis {
-        var counts = Array(repeating: 0, count: 24)
-        for bucket in buckets {
-            for event in bucket.timedEvents {
-                let s = max(0, min(1440, event.startMinute))
-                let e = max(s + 1, min(1440, event.endMinute))
-                let startHour = min(23, s / 60)
-                let endHour = min(23, (e - 1) / 60)
-                for h in startHour...endHour { counts[h] += 1 }
-            }
-        }
-        // An empty calendar gets a business-hours bias so the axis is still meaningful.
-        if !counts.contains(where: { $0 > 0 }) {
-            for h in 7..<22 { counts[h] = 1 }
-        }
-        return TimeAxis.build(from: counts)
+    private func dayOffset(_ date: Date, _ delta: Int) -> Date {
+        calendar.date(byAdding: .day, value: delta, to: date) ?? date
     }
 }
