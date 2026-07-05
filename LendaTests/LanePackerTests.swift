@@ -80,6 +80,16 @@ final class LanePackerTests: XCTestCase {
         }
     }
 
+    func test_identicalIntervals_getDistinctLanes() {
+        let items = LanePacker.pack([
+            fakeEvent(id: "a", start: 60, end: 120),
+            fakeEvent(id: "b", start: 60, end: 120),
+            fakeEvent(id: "c", start: 60, end: 120)
+        ])
+        XCTAssertEqual(Set(items.map(\.lane)), Set([0, 1, 2]))
+        XCTAssertTrue(items.allSatisfy { $0.totalLanes == 3 })
+    }
+
     func test_resultIsSortedByStartTime() {
         let items = LanePacker.pack([
             fakeEvent(id: "late", start: 200, end: 260),

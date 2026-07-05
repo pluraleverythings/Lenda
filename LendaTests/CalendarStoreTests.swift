@@ -193,6 +193,89 @@ final class CalendarStoreTests: XCTestCase {
                        "no expansion should mean no extra source queries")
     }
 
+    // MARK: - Layout-stability contract
+
+    func test_bucketIDs_stableAcrossEventLoads() async {
+        let store = makeStore()
+        await store.requestAccessAndLoad()
+        let idsBefore = store.days.map(\.id)
+        store.ensureLoaded(around: TestDate.date(day: 25))
+        store.ensureLoaded(around: TestDate.date(month: 2, day: 1))
+        XCTAssertEqual(store.days.map(\.id), idsBefore,
+                       "loading events must not change row identities — that's what keeps scroll geometry stable")
+    }
+
+    func test_timeAxis_doesNotShiftWhenScrollingLoadsMoreEvents() async {
+        let source = FakeCalendarSource()
+        source.events = [
+            .make(id: "near", start: TestDate.date(day: 10, hour: 9),
+                  end: TestDate.date(day: 10, hour: 10)),
+            .make(id: "far", start: TestDate.date(day: 25, hour: 5),
+                  end: TestDate.date(day: 25, hour: 6))
+        ]
+        let store = makeStore(source: source)
+        await store.requestAccessAndLoad()
+        let axisBefore = store.timeAxis
+        store.ensureLoaded(around: TestDate.date(day: 25))
+        XCTAssertEqual(store.dayBucket(for: TestDate.date(day: 25))?.timedEvents.count, 1,
+                       "the far event should be loaded into its bucket")
+        XCTAssertEqual(store.timeAxis, axisBefore,
+                       "scroll-driven loading must not move the axis; only reload() rebuilds it")
+    }
+
+    // MARK: - Incremental fetching
+
+    func test_ensureLoaded_fetchesOnlyTheMissingSlice() async {
+        let source = FakeCalendarSource()
+        let store = makeStore(source: source)
+        await store.requestAccessAndLoad()
+        let oldEnd = store.rangeEnd
+        store.ensureLoaded(around: TestDate.date(day: 25))
+        XCTAssertEqual(source.lastQueryWindow?.0, oldEnd,
+                       "forward expansion must query from where the loaded range ended, not re-fetch everything")
+    }
+
+    func test_reload_refetchesExactlyTheLoadedRange() async {
+        let source = FakeCalendarSource()
+        let store = makeStore(source: source)
+        await store.requestAccessAndLoad()
+        let queriesBefore = source.queryCount
+        store.reload()
+        XCTAssertEqual(source.queryCount, queriesBefore + 1)
+        XCTAssertEqual(source.lastQueryWindow?.0, store.rangeStart)
+        XCTAssertEqual(source.lastQueryWindow?.1, store.rangeEnd)
+    }
+
+    func test_recurringOccurrences_shareAnID_butAllSurvive() async {
+        // EventKit gives every occurrence of a recurring event the same
+        // identifier. Dedup must key on id + start so occurrences don't collapse.
+        let source = FakeCalendarSource()
+        source.events = [
+            .make(id: "weekly", start: TestDate.date(day: 10, hour: 9),
+                  end: TestDate.date(day: 10, hour: 10)),
+            .make(id: "weekly", start: TestDate.date(day: 11, hour: 9),
+                  end: TestDate.date(day: 11, hour: 10))
+        ]
+        let store = makeStore(source: source)
+        await store.requestAccessAndLoad()
+        XCTAssertEqual(store.dayBucket(for: TestDate.date(day: 10))?.timedEvents.count, 1)
+        XCTAssertEqual(store.dayBucket(for: TestDate.date(day: 11))?.timedEvents.count, 1)
+    }
+
+    // MARK: - Index lookups
+
+    func test_dayIndex_boundsAndLookup() async {
+        let store = makeStore()
+        await store.requestAccessAndLoad()
+        XCTAssertEqual(store.dayIndex(for: store.windowStart), 0)
+        XCTAssertEqual(store.dayIndex(for: TestDate.referenceToday), 40)
+        XCTAssertNil(store.dayIndex(for: TestDate.date(month: 1, day: 1)),
+                     "dates before the window have no index")
+        XCTAssertNil(store.dayIndex(for: store.windowEnd),
+                     "windowEnd is exclusive — it has no bucket")
+        XCTAssertEqual(store.dayBucket(for: TestDate.referenceToday)?.isToday, true)
+    }
+
     // MARK: - Month bar driver
 
     func test_monthsInRange_coversAllLoadedDays() async {

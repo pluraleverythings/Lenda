@@ -183,13 +183,18 @@ final class CalendarStore: ObservableObject {
         let axisStart = max(windowStart, dayOffset(today, -axisPadDays))
         let axisEnd = min(windowEnd, dayOffset(today, axisPadDays))
         var counts = Array(repeating: 0, count: 24)
-        if let startIdx = dayIndex(for: axisStart), let endIdx = dayIndex(for: axisEnd) {
-            for i in startIdx...max(startIdx, min(endIdx, days.count - 1)) {
+        // Walk buckets from axisStart until we reach axisEnd. Deliberately not
+        // `dayIndex(for: axisEnd)`: axisEnd can equal windowEnd (exclusive), which
+        // has no bucket index — resolving it would nil out and skip every event.
+        if let startIdx = dayIndex(for: axisStart) {
+            var i = startIdx
+            while i < days.count, days[i].date < axisEnd {
                 for event in days[i].timedEvents {
                     let s = max(0, min(1440, event.startMinute))
                     let e = max(s + 1, min(1440, event.endMinute))
                     for h in min(23, s / 60)...min(23, (e - 1) / 60) { counts[h] += 1 }
                 }
+                i += 1
             }
         }
         // An empty calendar gets a business-hours bias so the axis is still meaningful.
