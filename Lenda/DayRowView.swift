@@ -10,8 +10,15 @@ struct DayRowView: View {
     var onToggleFocus: () -> Void = {}
 
     @State private var selectedEvent: DayEvent?
+    /// Frame of the tapped event within the row, used to aim the shared popover's
+    /// arrow at the actual block instead of the row's center. Nil → row bounds.
+    @State private var selectedEventRect: CGRect?
     @State private var showingAllDayList = false
     @State private var showingSummary = false
+
+    /// x-origin of the track area inside the row (mirror of the body's HStack:
+    /// horizontal padding + day label + 8pt spacing).
+    private var trackOriginX: CGFloat { DR.horizontalPadding + DR.dayLabelWidth + 8 }
 
     private var rowHeight: CGFloat {
         isFocused ? DR.dayRowHeight * 3 : DR.dayRowHeight
@@ -68,8 +75,13 @@ struct DayRowView: View {
         }
         // One popover modifier per row instead of one per event — every tappable
         // event/chip/card just sets `selectedEvent` and this single attachment
-        // presents the detail.
-        .popover(item: $selectedEvent) { event in
+        // presents the detail, with the arrow aimed at the tapped block's frame
+        // when we know it.
+        .popover(
+            item: $selectedEvent,
+            attachmentAnchor: selectedEventRect.map { PopoverAttachmentAnchor.rect(.rect($0)) }
+                ?? .rect(.bounds)
+        ) { event in
             eventPopoverContent(event)
         }
     }
@@ -203,7 +215,10 @@ struct DayRowView: View {
                 .lineLimit(1)
         }
         .contentShape(Rectangle())
-        .onTapGesture { selectedEvent = ev }
+        .onTapGesture {
+            selectedEventRect = nil
+            selectedEvent = ev
+        }
     }
 
     private func timeOfDayColumn(title: String, events: [DayEvent]) -> some View {
@@ -253,7 +268,10 @@ struct DayRowView: View {
         .background(ev.color.opacity(0.12))
         .clipShape(RoundedRectangle(cornerRadius: 5))
         .contentShape(Rectangle())
-        .onTapGesture { selectedEvent = ev }
+        .onTapGesture {
+            selectedEventRect = nil
+            selectedEvent = ev
+        }
     }
 
     // MARK: - Track
@@ -318,7 +336,13 @@ struct DayRowView: View {
         }
         .contentShape(Rectangle())
         .offset(x: hStackOffsetX, y: topY)
-        .onTapGesture { selectedEvent = item.event }
+        .onTapGesture {
+            selectedEventRect = CGRect(
+                x: trackOriginX + startX, y: topY,
+                width: blockWidth, height: blockHeight
+            )
+            selectedEvent = item.event
+        }
     }
 
     /// Two-line journal-style label for an event sitting outside its colored block.
